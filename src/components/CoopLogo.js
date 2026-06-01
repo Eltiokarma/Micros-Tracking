@@ -5,6 +5,7 @@
 import React from 'react';
 import { View, Text } from 'react-native';
 import colors from '../theme/colors';
+import { black } from '../theme/fonts';
 
 export default function CoopLogo({ size = 88 }) {
   return (
@@ -22,8 +23,8 @@ export default function CoopLogo({ size = 88 }) {
     >
       <Text
         style={{
+          fontFamily: black,
           color: colors.white,
-          fontWeight: '900',
           fontSize: size * 0.34,
           letterSpacing: -1,
         }}

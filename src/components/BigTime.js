@@ -12,7 +12,7 @@
 import React, { useRef, useEffect } from 'react';
 import { View, Text, Animated } from 'react-native';
 import colors from '../theme/colors';
-import { mono } from '../theme/fonts';
+import { mono, black } from '../theme/fonts';
 
 const FONT_SIZE = 96;
 
@@ -39,8 +39,8 @@ function AnimatedDigit({ ch, color }) {
     <Animated.View style={{ minWidth, alignItems: 'center', transform: [{ translateY }], opacity }}>
       <Text
         style={{
+          fontFamily: black,
           fontSize: FONT_SIZE,
-          fontWeight: '900',
           letterSpacing: -3,
           lineHeight: FONT_SIZE * 0.98,
           color,

@@ -14,6 +14,7 @@
 import React, { useRef, useState } from 'react';
 import { View, Text, PanResponder } from 'react-native';
 import colors from '../theme/colors';
+import { black } from '../theme/fonts';
 
 const TRACK_H = 88;
 const THUMB = 68;
@@ -112,10 +113,10 @@ export default function SosSlider({ status = 'green', onFire }) {
       {/* Texto central */}
       <Text
         style={{
+          fontFamily: black,
           textAlign: 'center',
           paddingLeft: THUMB,
           fontSize: 22,
-          fontWeight: '900',
           letterSpacing: 2.5,
           color: progress > 0.3 ? '#fff' : colors.red,
           opacity: progress > 0.85 ? 0 : 1,
@@ -144,7 +145,7 @@ export default function SosSlider({ status = 'green', onFire }) {
           elevation: 4,
         }}
       >
-        <Text style={{ color: colors.red, fontWeight: '900', fontSize: 20 }}>
+        <Text style={{ fontFamily: black, color: colors.red, fontSize: 20 }}>
           {fired ? '✓' : 'SOS'}
         </Text>
       </View>

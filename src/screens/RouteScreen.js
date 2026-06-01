@@ -18,7 +18,7 @@ import Semaphore from '../components/Semaphore';
 import SosSlider from '../components/SosSlider';
 
 export default function RouteScreen({ onFireSos }) {
-  const { miGap, myPosition } = useFleet();
+  const { miGap, myPosition, sendSos } = useFleet();
 
   const front = miGap?.toAhead || '--:--';
   const back = miGap?.toBehind || '--:--';
@@ -39,8 +39,14 @@ export default function RouteScreen({ onFireSos }) {
         <BigTime label="-1 atras" value={back} color={statusColor} />
       </View>
 
-      {/* Abajo: SOS deslizable */}
-      <SosSlider status={status} onFire={onFireSos} />
+      {/* Abajo: SOS deslizable. Al dispararse: envia al servidor Y muestra el flash. */}
+      <SosSlider
+        status={status}
+        onFire={() => {
+          sendSos(); // envia { type:'sos', lat, lng, timestamp } por WebSocket
+          if (onFireSos) onFireSos(); // flash rojo inmediato a pantalla completa
+        }}
+      />
     </View>
   );
 }

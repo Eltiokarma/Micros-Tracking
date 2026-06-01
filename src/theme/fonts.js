@@ -1,17 +1,20 @@
-// Tipografias.
-// "Archivo Black" y "JetBrains Mono" no existen en React Native por defecto.
-// Por ahora:
-//   - Titulos tipo "Archivo Black" -> usamos fontWeight '900'.
-//   - Etiquetas tipo "JetBrains Mono" -> usamos la monospace del sistema.
-// Mas adelante podemos cargar las fuentes reales con expo-font / @expo-google-fonts
-// y reemplazar 'mono' por la fuente cargada, sin tocar las pantallas.
+// Tipografias reales del prototipo, cargadas con expo-font (ver App.js).
+//
+//   - "Archivo Black"  -> titulos y numeros grandes (la fuente "gorda").
+//   - "JetBrains Mono" -> etiquetas tecnicas (TRAMO, VEL. PROM, EN VIVO...).
+//
+// Los nombres de familia (ArchivoBlack_400Regular, etc.) son los que exponen
+// los paquetes @expo-google-fonts. Las pantallas importan `black` y `mono`,
+// asi que si algun dia cambiamos de fuente, se cambia SOLO aca.
 
-import { Platform } from 'react-native';
+export const FONTS = {
+  black: 'ArchivoBlack_400Regular',
+  mono: 'JetBrainsMono_400Regular',
+  monoBold: 'JetBrainsMono_700Bold',
+};
 
-export const mono = Platform.select({
-  ios: 'Courier',
-  android: 'monospace',
-  default: 'monospace',
-});
+// Aliases que ya usan los componentes:
+export const black = FONTS.black;
+export const mono = FONTS.mono;
 
-export default { mono };
+export default FONTS;

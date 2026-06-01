@@ -44,6 +44,38 @@ El servidor **transmite** a todos:
 > `src/services/routeProgress.js` y es copia exacta del cliente web, para que
 > app y servidor "hablen el mismo idioma" de progreso.
 
+### Protocolo SOS y Chat (a implementar en el servidor)
+
+La app **ya envía y escucha** estos mensajes. El servidor todavía no los
+reparte; cuando se agregue el broadcast, funcionan sin tocar la app.
+
+**SOS**
+
+```jsonc
+// APP -> SERVIDOR   (el servidor conoce unitId/driverName por el 'identify')
+{ "type": "sos", "lat": <n|null>, "lng": <n|null>, "timestamp": <ms> }
+
+// SERVIDOR -> TODOS
+{ "type": "sos_alert", "unitId": "<id>", "driverName": "<nombre>",
+  "lat": <n|null>, "lng": <n|null>, "timestamp": <ms> }
+```
+
+**Chat**
+
+```jsonc
+// APP -> SERVIDOR
+{ "type": "chat", "text": "<mensaje>", "timestamp": <ms> }
+
+// SERVIDOR -> TODOS
+{ "type": "chat_msg", "unitId": "<id>", "driverName": "<nombre>",
+  "text": "<mensaje>", "timestamp": <ms> }
+```
+
+> En ambos casos el servidor debe rellenar `unitId` y `driverName` a partir del
+> socket que envía (igual que ya hace con `gps`), y hacer broadcast a todos los
+> clientes conectados. El cliente reenvía el `sos_alert`/`chat_msg` también al
+> emisor (sirve para confirmar el envío).
+
 ## Estructura
 
 ```
@@ -94,7 +126,8 @@ directo en los celulares de los choferes.
 - [x] GPS en segundo plano (foreground service)
 - [x] WebSocket con reconexión
 - [x] Carrusel deslizable Chat ← Ruta → Mapa con dots
-- [ ] SOS: hoy es visual (flash). Falta enviar alerta real al servidor.
-- [ ] Chat: hoy es placeholder con mensajes de ejemplo.
-- [ ] Fuentes reales (Archivo Black / JetBrains Mono) vía expo-font.
+- [x] Fuentes reales (Archivo Black / JetBrains Mono) vía expo-font
+- [x] SOS: cliente listo (envía `sos`, escucha `sos_alert`, flash con nombre)
+- [x] Chat: cliente listo (envía `chat`, escucha `chat_msg`, UI con envío)
+- [ ] **Servidor**: agregar broadcast de `sos_alert` y `chat_msg` (ver protocolo arriba)
 ```

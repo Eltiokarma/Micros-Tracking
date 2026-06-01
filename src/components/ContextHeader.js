@@ -4,7 +4,7 @@
 import React from 'react';
 import { View, Text } from 'react-native';
 import colors from '../theme/colors';
-import { mono } from '../theme/fonts';
+import { mono, black } from '../theme/fonts';
 
 export default function ContextHeader({ currentStop, nextStop, avgSpeed = 0 }) {
   // El numero de velocidad cambia de color: lento (amarillo), rapido (rojo).
@@ -50,7 +50,7 @@ export default function ContextHeader({ currentStop, nextStop, avgSpeed = 0 }) {
         </View>
         <Text
           numberOfLines={1}
-          style={{ fontSize: 14, fontWeight: '900', color: colors.fg, letterSpacing: -0.2 }}
+          style={{ fontFamily: black, fontSize: 14, color: colors.fg, letterSpacing: -0.2 }}
         >
           {currentStop} <Text style={{ color: colors.dim, fontWeight: '400' }}>→</Text> {nextStop}
         </Text>
@@ -83,8 +83,8 @@ export default function ContextHeader({ currentStop, nextStop, avgSpeed = 0 }) {
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 3 }}>
           <Text
             style={{
+              fontFamily: black,
               fontSize: 22,
-              fontWeight: '900',
               letterSpacing: -1,
               color: speedTone,
               fontVariant: ['tabular-nums'],

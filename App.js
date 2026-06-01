@@ -1,10 +1,11 @@
 // ============================================================================
 //  App.js  —  Ensamblaje final
 // ============================================================================
+//  - Carga las fuentes reales (Archivo Black / JetBrains Mono) antes de pintar.
 //  - Envuelve todo en <FleetProvider> (la "pizarra" global).
 //  - Si NO hay sesion -> LoginScreen. Si hay -> el carrusel de 3 pantallas.
 //  - Carrusel: Chat <- Ruta -> Mapa, deslizable, con dots de navegacion.
-//  - Flash rojo a pantalla completa cuando se dispara el SOS.
+//  - Flash rojo a pantalla completa cuando se dispara un SOS (propio o de otro).
 //
 //  El import de './src/services/location' al inicio NO es decorativo:
 //  registra la tarea de GPS en segundo plano (TaskManager.defineTask) apenas
@@ -17,6 +18,12 @@ import React, { useRef, useState, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import PagerView from 'react-native-pager-view';
+import { useFonts } from 'expo-font';
+import { ArchivoBlack_400Regular } from '@expo-google-fonts/archivo-black';
+import {
+  JetBrainsMono_400Regular,
+  JetBrainsMono_700Bold,
+} from '@expo-google-fonts/jetbrains-mono';
 
 import { FleetProvider, useFleet } from './src/context/FleetContext';
 import LoginScreen from './src/screens/LoginScreen';
@@ -24,27 +31,37 @@ import ChatScreen from './src/screens/ChatScreen';
 import RouteScreen from './src/screens/RouteScreen';
 import MapScreen from './src/screens/MapScreen';
 import colors from './src/theme/colors';
-import { mono } from './src/theme/fonts';
+import { mono, black } from './src/theme/fonts';
 
 const LABELS = ['CHAT', 'RUTA', 'MAPA'];
 
 function Carousel() {
+  const { sosAlert, unitId } = useFleet();
   const pagerRef = useRef(null);
   const [page, setPage] = useState(1); // arrancamos en RUTA (la pantalla central)
-  const [sosFlash, setSosFlash] = useState(false);
 
-  // El flash de SOS se apaga solo a los 2 segundos.
+  // flash = { title, subtitle } o null. Lo dispara mi propio SOS o el de otros.
+  const [flash, setFlash] = useState(null);
+
+  // El flash se apaga solo a los 2 segundos.
   useEffect(() => {
-    if (!sosFlash) return;
-    const t = setTimeout(() => setSosFlash(false), 2000);
+    if (!flash) return;
+    const t = setTimeout(() => setFlash(null), 2000);
     return () => clearTimeout(t);
-  }, [sosFlash]);
+  }, [flash]);
+
+  // Cuando llega una alerta de OTRO chofer, mostramos su nombre.
+  // (La mia ya la muestro al instante desde onFireSos, sin esperar al servidor.)
+  useEffect(() => {
+    if (sosAlert && sosAlert.unitId !== unitId) {
+      setFlash({ title: 'SOS', subtitle: `${sosAlert.driverName || sosAlert.unitId} necesita ayuda` });
+    }
+  }, [sosAlert]);
 
   const goTo = (i) => pagerRef.current?.setPage(i);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      {/* PagerView: paginado horizontal nativo (maneja el swipe por nosotros) */}
       <PagerView
         ref={pagerRef}
         style={{ flex: 1 }}
@@ -55,15 +72,14 @@ function Carousel() {
           <ChatScreen />
         </View>
         <View key="ruta" style={{ flex: 1 }}>
-          <RouteScreen onFireSos={() => setSosFlash(true)} />
+          <RouteScreen onFireSos={() => setFlash({ title: 'SOS', subtitle: 'ALERTA ENVIADA' })} />
         </View>
         <View key="mapa" style={{ flex: 1 }}>
           <MapScreen />
         </View>
       </PagerView>
 
-      {/* Overlay superior: dots de navegacion + etiqueta de la pagina.
-          pointerEvents="box-none" deja pasar los toques al mapa salvo en los dots. */}
+      {/* Overlay superior: dots + etiqueta. box-none deja pasar toques al mapa. */}
       <View pointerEvents="box-none" style={styles.topOverlay}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 36 }}>
           {[0, 1, 2].map((i) => (
@@ -98,11 +114,23 @@ function Carousel() {
       </View>
 
       {/* Flash rojo de SOS a pantalla completa */}
-      {sosFlash && (
+      {flash && (
         <View style={styles.sosFlash}>
-          <Text style={{ color: '#fff', fontWeight: '900', fontSize: 44, letterSpacing: 4 }}>SOS</Text>
-          <Text style={{ color: '#fff', fontWeight: '900', fontSize: 18, letterSpacing: 2, marginTop: 6 }}>
-            ALERTA ENVIADA
+          <Text style={{ fontFamily: black, color: '#fff', fontSize: 44, letterSpacing: 4 }}>
+            {flash.title}
+          </Text>
+          <Text
+            style={{
+              fontFamily: black,
+              color: '#fff',
+              fontSize: 18,
+              letterSpacing: 2,
+              marginTop: 6,
+              textAlign: 'center',
+              paddingHorizontal: 24,
+            }}
+          >
+            {flash.subtitle}
           </Text>
         </View>
       )}
@@ -117,6 +145,17 @@ function Root() {
 }
 
 export default function App() {
+  // Cargamos las fuentes antes de pintar. Mientras tanto, fondo oscuro.
+  const [fontsLoaded] = useFonts({
+    ArchivoBlack_400Regular,
+    JetBrainsMono_400Regular,
+    JetBrainsMono_700Bold,
+  });
+
+  if (!fontsLoaded) {
+    return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
+  }
+
   return (
     <FleetProvider>
       <StatusBar style="light" />

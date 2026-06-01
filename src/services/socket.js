@@ -99,6 +99,25 @@ export function connect(myUnitId, myDriverName) {
     } else if (msg.type === 'unit_joined' || msg.type === 'unit_left') {
       // Los reenviamos por si una pantalla quiere mostrar un aviso.
       emit({ type: msg.type, unitId: msg.unitId });
+    } else if (msg.type === 'sos_alert') {
+      // Alguien (o yo mismo) disparo el SOS; el servidor lo reparte a todos.
+      emit({
+        type: 'sos_alert',
+        unitId: msg.unitId,
+        driverName: msg.driverName,
+        lat: msg.lat,
+        lng: msg.lng,
+        timestamp: msg.timestamp,
+      });
+    } else if (msg.type === 'chat_msg') {
+      // Mensaje de chat repartido por el servidor.
+      emit({
+        type: 'chat_msg',
+        unitId: msg.unitId,
+        driverName: msg.driverName,
+        text: msg.text,
+        timestamp: msg.timestamp,
+      });
     }
   };
 
@@ -153,6 +172,23 @@ export function sendGps({ lat, lng, speed = 0, routeProgress = 0 }) {
 }
 
 // ---------------------------------------------------------------------------
+//  sendSos(): dispara una alerta de emergencia. El servidor agrega unitId y
+//  driverName (los conoce por el 'identify') y reparte un 'sos_alert' a todos.
+// ---------------------------------------------------------------------------
+export function sendSos({ lat = null, lng = null } = {}) {
+  return send({ type: 'sos', lat, lng, timestamp: Date.now() });
+}
+
+// ---------------------------------------------------------------------------
+//  sendChat(): envia un mensaje de texto. El servidor lo reparte como 'chat_msg'.
+// ---------------------------------------------------------------------------
+export function sendChat(text) {
+  const limpio = (text || '').trim();
+  if (!limpio) return false;
+  return send({ type: 'chat', text: limpio, timestamp: Date.now() });
+}
+
+// ---------------------------------------------------------------------------
 //  subscribe(): una pantalla llama esto para empezar a recibir eventos.
 //  Devuelve una funcion "unsubscribe" para dejar de escuchar cuando la
 //  pantalla se desmonta (evita fugas de memoria). Patron clasico de useEffect.
@@ -190,4 +226,4 @@ export function disconnect() {
   connected = false;
 }
 
-export default { connect, disconnect, sendGps, subscribe, getLastState, isConnected };
+export default { connect, disconnect, sendGps, sendSos, sendChat, subscribe, getLastState, isConnected };

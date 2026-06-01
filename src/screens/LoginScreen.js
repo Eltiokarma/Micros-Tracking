@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import colors from '../theme/colors';
-import { mono } from '../theme/fonts';
+import { mono, black } from '../theme/fonts';
 import { COOP } from '../config/coop';
 import CoopLogo from '../components/CoopLogo';
 import Field from '../components/Field';
@@ -67,8 +67,8 @@ export default function LoginScreen() {
             <CoopLogo size={88} />
             <Text
               style={{
+                fontFamily: black,
                 fontSize: 26,
-                fontWeight: '900',
                 letterSpacing: -0.5,
                 color: colors.white,
                 marginTop: 14,
@@ -193,8 +193,8 @@ export default function LoginScreen() {
           >
             <Text
               style={{
+                fontFamily: black,
                 fontSize: 20,
-                fontWeight: '900',
                 letterSpacing: 2,
                 color: colors.white,
               }}

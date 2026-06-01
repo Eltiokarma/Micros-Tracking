@@ -40,6 +40,10 @@ export function FleetProvider({ children }) {
   // --- Mi posicion local (para el punto blanco del mapa) ---
   const [myPosition, setMyPosition] = useState(null);
 
+  // --- Chat y alertas SOS ---
+  const [messages, setMessages] = useState([]); // historial de chat de la sesion
+  const [sosAlert, setSosAlert] = useState(null); // ultima alerta recibida
+
   // --- Aviso si el chofer NO dio permiso de background ---
   const [backgroundOk, setBackgroundOk] = useState(true);
 
@@ -57,6 +61,19 @@ export function FleetProvider({ children }) {
         setTotalOnRoute(event.state.totalOnRoute);
       } else if (event.type === 'status') {
         setConnected(event.connected);
+      } else if (event.type === 'sos_alert') {
+        // id unico para que la pantalla detecte "llego una alerta nueva".
+        setSosAlert({ ...event, id: `${event.unitId}-${event.timestamp}` });
+      } else if (event.type === 'chat_msg') {
+        setMessages((prev) => [
+          ...prev,
+          {
+            unitId: event.unitId,
+            driverName: event.driverName,
+            text: event.text,
+            timestamp: event.timestamp,
+          },
+        ]);
       }
     });
 
@@ -103,6 +120,20 @@ export function FleetProvider({ children }) {
     setTotalOnRoute(0);
     setMyPosition(null);
     setConnected(false);
+    setMessages([]);
+    setSosAlert(null);
+  }, []);
+
+  // ------------------------------------------------------------------
+  //  Acciones de SOS y chat (usan mi posicion local actual).
+  // ------------------------------------------------------------------
+  const sendSos = useCallback(() => {
+    const p = location.getLastPosition();
+    socket.sendSos({ lat: p?.lat ?? null, lng: p?.lng ?? null });
+  }, []);
+
+  const sendChat = useCallback((text) => {
+    socket.sendChat(text);
   }, []);
 
   // ------------------------------------------------------------------
@@ -125,8 +156,12 @@ export function FleetProvider({ children }) {
     connected,
     myPosition,
     backgroundOk,
+    messages,
+    sosAlert,
     login,
     logout,
+    sendSos,
+    sendChat,
   };
 
   return <FleetContext.Provider value={value}>{children}</FleetContext.Provider>;

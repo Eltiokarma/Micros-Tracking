@@ -56,7 +56,7 @@ function Carousel() {
     if (sosAlert && sosAlert.unitId !== unitId) {
       setFlash({ title: 'SOS', subtitle: `${sosAlert.driverName || sosAlert.unitId} necesita ayuda` });
     }
-  }, [sosAlert]);
+  }, [sosAlert, unitId]);
 
   const goTo = (i) => pagerRef.current?.setPage(i);
 

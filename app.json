@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "R-14 Rastreo",
+    "slug": "micros-tracking",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "r14rastreo",
+    "splash": {
+      "backgroundColor": "#0A1A2E",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": ["**/*"],
+
+    "android": {
+      "package": "pe.coopr14.rastreo",
+      "versionCode": 1,
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "WAKE_LOCK"
+      ]
+    },
+
+    "ios": {
+      "bundleIdentifier": "pe.coopr14.rastreo",
+      "supportsTablet": false,
+      "infoPlist": {
+        "UIBackgroundModes": ["location"]
+      }
+    },
+
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "R-14 usa tu ubicacion para mostrar tu combi en el mapa y calcular las brechas con las demas unidades.",
+          "locationAlwaysAndWhenInUsePermission": "R-14 necesita tu ubicacion incluso con la pantalla apagada para seguir reportando tu posicion mientras manejas.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ]
+    ]
+  }
+}

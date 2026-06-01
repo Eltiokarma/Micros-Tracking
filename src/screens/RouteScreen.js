@@ -10,6 +10,7 @@ import React from 'react';
 import { View } from 'react-native';
 import { useFleet } from '../context/FleetContext';
 import { computeStatus, parseGap } from '../utils/status';
+import { getTramo } from '../services/routeProgress';
 import { TARGET_GAP_SEC } from '../config/coop';
 import colors from '../theme/colors';
 import ContextHeader from '../components/ContextHeader';
@@ -27,10 +28,13 @@ export default function RouteScreen({ onFireSos }) {
   const status = computeStatus(parseGap(miGap?.toAhead), parseGap(miGap?.toBehind), TARGET_GAP_SEC);
   const statusColor = { red: colors.red, yellow: colors.yellow, green: colors.green }[status];
 
+  // Tramo real (parada actual -> siguiente) segun mi progreso en la ruta.
+  const { currentStop, nextStop } = getTramo(myPosition?.routeProgress ?? 0);
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg, paddingHorizontal: 14, paddingTop: 48, paddingBottom: 20 }}>
       {/* Arriba: tramo + velocidad */}
-      <ContextHeader currentStop="Terminal Sur" nextStop="Huancane" avgSpeed={avgSpeed} />
+      <ContextHeader currentStop={currentStop} nextStop={nextStop} avgSpeed={avgSpeed} />
 
       {/* Centro: brechas + semaforo, repartidos en el espacio disponible */}
       <View style={{ flex: 1, justifyContent: 'space-around', alignItems: 'center' }}>

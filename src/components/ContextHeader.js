@@ -52,7 +52,16 @@ export default function ContextHeader({ currentStop, nextStop, avgSpeed = 0 }) {
           numberOfLines={1}
           style={{ fontFamily: black, fontSize: 14, color: colors.fg, letterSpacing: -0.2 }}
         >
-          {currentStop} <Text style={{ color: colors.dim, fontWeight: '400' }}>→</Text> {nextStop}
+          {nextStop ? (
+            <>
+              {currentStop} <Text style={{ color: colors.dim, fontWeight: '400' }}>→</Text> {nextStop}
+            </>
+          ) : (
+            // Fin de ruta: ya no hay siguiente parada.
+            <>
+              {currentStop} <Text style={{ color: colors.dim, fontWeight: '400' }}>· fin</Text>
+            </>
+          )}
         </Text>
       </View>
 

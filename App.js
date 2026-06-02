@@ -58,7 +58,7 @@ function Carousel() {
     }
   }, [sosAlert, unitId]);
 
-  const goTo = (i) => pagerRef.current?.setPage(i);
+  const goTo = (i) => pagerRef.current?.setPage(Math.max(0, Math.min(2, i)));
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -75,7 +75,8 @@ function Carousel() {
           <RouteScreen onFireSos={() => setFlash({ title: 'SOS', subtitle: 'ALERTA ENVIADA' })} />
         </View>
         <View key="mapa" style={{ flex: 1 }}>
-          <MapScreen />
+          {/* onSwipe: el WebView avisa un gesto horizontal y cambiamos de tarjeta */}
+          <MapScreen onSwipe={(dir) => goTo(dir === 'next' ? page + 1 : page - 1)} />
         </View>
       </PagerView>
 

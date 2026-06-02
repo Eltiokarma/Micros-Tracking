@@ -102,12 +102,47 @@ const HTML = `
     if (window.ReactNativeWebView) {
       window.ReactNativeWebView.postMessage('ready');
     }
+
+    // --- GESTOS ---------------------------------------------------------
+    // El carrusel maneja el swipe HORIZONTAL; el mapa el paneo VERTICAL + zoom.
+    // Desactivamos el arrastre omnidireccional de Leaflet (que se "comia" el
+    // swipe lateral), hacemos paneo vertical propio, y reenviamos el gesto
+    // horizontal a React Native para cambiar de tarjeta. El pinch-zoom sigue.
+    map.dragging.disable();
+    (function () {
+      var sx = 0, sy = 0, lastY = 0, eje = null, activo = false;
+      var cont = document.getElementById('map');
+      cont.addEventListener('touchstart', function (e) {
+        if (e.touches.length !== 1) { activo = false; return; } // 2 dedos = zoom
+        activo = true; eje = null;
+        sx = e.touches[0].clientX; sy = e.touches[0].clientY; lastY = sy;
+      }, { passive: true });
+      cont.addEventListener('touchmove', function (e) {
+        if (!activo || e.touches.length !== 1) return;
+        var x = e.touches[0].clientX, y = e.touches[0].clientY;
+        var dx = x - sx, dy = y - sy;
+        if (!eje && (Math.abs(dx) > 10 || Math.abs(dy) > 10)) {
+          eje = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'; // fijamos el eje una vez
+        }
+        if (eje === 'y') { map.panBy([0, lastY - y], { animate: false }); lastY = y; }
+        // si eje === 'x' no movemos el mapa: es swipe de carrusel
+      }, { passive: true });
+      cont.addEventListener('touchend', function (e) {
+        if (!activo) return;
+        activo = false;
+        var ex = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0].clientX : sx;
+        var dx = ex - sx;
+        if (eje === 'x' && Math.abs(dx) > 50 && window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'swipe', dir: dx < 0 ? 'next' : 'prev' }));
+        }
+      }, { passive: true });
+    })();
   </script>
 </body>
 </html>
 `;
 
-export default function MapScreen() {
+export default function MapScreen({ onSwipe }) {
   const { myPosition, otros, totalOnRoute, connected } = useFleet();
   const webRef = useRef(null);
   const [ready, setReady] = useState(false);
@@ -139,9 +174,20 @@ export default function MapScreen() {
         ref={webRef}
         originWhitelist={['*']}
         source={{ html: HTML }}
-        // La WebView nos avisa "ready" cuando el mapa termino de inicializar.
+        // La WebView nos avisa "ready" al cargar, y "swipe" cuando el dedo
+        // hace un gesto horizontal sobre el mapa (para cambiar de tarjeta).
         onMessage={(e) => {
-          if (e.nativeEvent.data === 'ready') setReady(true);
+          const data = e.nativeEvent.data;
+          if (data === 'ready') {
+            setReady(true);
+            return;
+          }
+          try {
+            const msg = JSON.parse(data);
+            if (msg.type === 'swipe' && onSwipe) onSwipe(msg.dir);
+          } catch {
+            // ignorar mensajes que no sean JSON
+          }
         }}
         style={{ flex: 1, backgroundColor: colors.bg }}
       />
@@ -150,17 +196,22 @@ export default function MapScreen() {
       <View
         style={{
           position: 'absolute',
-          top: 48,
+          top: 56,
           alignSelf: 'center',
           flexDirection: 'row',
           alignItems: 'center',
           gap: 8,
-          paddingVertical: 6,
-          paddingHorizontal: 12,
+          paddingVertical: 7,
+          paddingHorizontal: 14,
           borderRadius: 100,
           backgroundColor: colors.panel,
           borderWidth: 1,
           borderColor: colors.line,
+          elevation: 4,
+          shadowColor: '#000',
+          shadowOpacity: 0.3,
+          shadowRadius: 6,
+          shadowOffset: { width: 0, height: 2 },
         }}
       >
         <View

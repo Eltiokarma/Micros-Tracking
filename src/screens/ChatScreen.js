@@ -44,7 +44,7 @@ export default function ChatScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={{ flex: 1, backgroundColor: colors.bg }}
     >
-      <View style={{ flex: 1, paddingTop: 48 }}>
+      <View style={{ flex: 1, paddingTop: 56 }}>
         <Text
           style={{
             fontFamily: mono,
@@ -124,14 +124,15 @@ export default function ChatScreen() {
           />
           <Pressable
             onPress={enviar}
-            style={{
+            style={({ pressed }) => ({
               width: 44,
               height: 44,
               borderRadius: 22,
-              backgroundColor: colors.bright,
+              backgroundColor: pressed ? colors.brand : colors.bright,
               alignItems: 'center',
               justifyContent: 'center',
-            }}
+              opacity: texto.trim() ? 1 : 0.5, // apagado cuando no hay texto
+            })}
           >
             <Text style={{ fontFamily: black, color: colors.white, fontSize: 18 }}>→</Text>
           </Pressable>

@@ -160,11 +160,14 @@ export function FleetProvider({ children }) {
   // ------------------------------------------------------------------
   const sendSos = useCallback(() => {
     const p = location.getLastPosition();
-    socket.sendSos({ lat: p?.lat ?? null, lng: p?.lng ?? null });
+    const ok = socket.sendSos({ lat: p?.lat ?? null, lng: p?.lng ?? null });
+    // [DIAG] confirma si el socket de la UI (distinto al de la tarea) envia.
+    console.log('[diag] sendSos via UI socket | ws.conectado=' + socket.isConnected() + ' | enviado=' + ok);
   }, []);
 
   const sendChat = useCallback((text) => {
-    socket.sendChat(text);
+    const ok = socket.sendChat(text);
+    console.log('[diag] sendChat via UI socket | ws.conectado=' + socket.isConnected() + ' | enviado=' + ok);
   }, []);
 
   // ------------------------------------------------------------------

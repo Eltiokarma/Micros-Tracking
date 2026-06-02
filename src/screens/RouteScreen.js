@@ -28,7 +28,7 @@ export default function RouteScreen({ onFireSos }) {
   const statusColor = { red: colors.red, yellow: colors.yellow, green: colors.green }[status];
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg, paddingHorizontal: 14, paddingTop: 48, paddingBottom: 20 }}>
+    <View style={{ flex: 1, backgroundColor: colors.bg, paddingHorizontal: 16, paddingTop: 56, paddingBottom: 24 }}>
       {/* Arriba: parada mas cercana + velocidad */}
       <ContextHeader parada={parada} avgSpeed={avgSpeed} />
 

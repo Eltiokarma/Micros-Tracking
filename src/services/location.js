@@ -18,6 +18,7 @@
 //  development build o el APK de EAS. Lo veremos al momento de probar.
 // ============================================================================
 
+import { AppState } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { sendGps, isConnected } from './socket';
@@ -135,6 +136,33 @@ export async function pedirPermisos() {
 }
 
 // ============================================================================
+//  ESPERAR A PRIMER PLANO
+//  El foreground service NO se puede arrancar con la app en segundo plano
+//  (Android lo rechaza: "cannot be started while the app is in the background").
+//  El dialogo de permisos —sobre todo el de "ubicacion todo el tiempo", que
+//  abre Ajustes— deja la app en background un instante. Por eso, antes de
+//  arrancar el servicio, esperamos a que la app vuelva a estar "active".
+//  Con un timeout de seguridad para no colgarnos para siempre.
+// ============================================================================
+function esperarPrimerPlano(timeoutMs = 8000) {
+  if (AppState.currentState === 'active') return Promise.resolve();
+  return new Promise((resolve) => {
+    let listo = false;
+    const terminar = () => {
+      if (listo) return;
+      listo = true;
+      sub.remove();
+      clearTimeout(t);
+      resolve();
+    };
+    const sub = AppState.addEventListener('change', (estado) => {
+      if (estado === 'active') terminar();
+    });
+    const t = setTimeout(terminar, timeoutMs); // red de seguridad
+  });
+}
+
+// ============================================================================
 //  ARRANCAR / DETENER EL RASTREO
 // ============================================================================
 export async function iniciarRastreo() {
@@ -147,6 +175,11 @@ export async function iniciarRastreo() {
   const yaCorriendo = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK);
   console.log('[diag] iniciarRastreo: yaCorriendo =', yaCorriendo); // [DIAG]
   if (yaCorriendo) return { ok: true, yaActivo: true };
+
+  // Esperar a que la app este en primer plano antes de arrancar el servicio.
+  console.log('[diag] AppState antes de esperar =', AppState.currentState); // [DIAG]
+  await esperarPrimerPlano();
+  console.log('[diag] AppState al arrancar =', AppState.currentState); // [DIAG]
 
   // [DIAG] Envolvemos startLocationUpdatesAsync para VER el error real si falla.
   // Logueamos y re-lanzamos: NO cambiamos el comportamiento, solo lo hacemos visible.

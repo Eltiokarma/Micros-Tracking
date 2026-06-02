@@ -6,7 +6,7 @@ import { View, Text } from 'react-native';
 import colors from '../theme/colors';
 import { mono, black } from '../theme/fonts';
 
-export default function ContextHeader({ currentStop, nextStop, avgSpeed = 0 }) {
+export default function ContextHeader({ parada, avgSpeed = 0 }) {
   // El numero de velocidad cambia de color: lento (amarillo), rapido (rojo).
   const speedTone =
     avgSpeed < 18 ? colors.yellow : avgSpeed > 38 ? colors.red : colors.bright;
@@ -45,23 +45,14 @@ export default function ContextHeader({ currentStop, nextStop, avgSpeed = 0 }) {
               textTransform: 'uppercase',
             }}
           >
-            Tramo
+            Parada
           </Text>
         </View>
         <Text
           numberOfLines={1}
           style={{ fontFamily: black, fontSize: 14, color: colors.fg, letterSpacing: -0.2 }}
         >
-          {nextStop ? (
-            <>
-              {currentStop} <Text style={{ color: colors.dim, fontWeight: '400' }}>→</Text> {nextStop}
-            </>
-          ) : (
-            // Fin de ruta: ya no hay siguiente parada.
-            <>
-              {currentStop} <Text style={{ color: colors.dim, fontWeight: '400' }}>· fin</Text>
-            </>
-          )}
+          {parada || '—'}
         </Text>
       </View>
 

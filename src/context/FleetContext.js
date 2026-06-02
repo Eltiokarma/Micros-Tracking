@@ -21,6 +21,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import * as socket from './../services/socket';
 import * as location from './../services/location';
+import { leerEstado } from './../services/sharedStatus';
 
 // 1) Creamos el contexto (la "pizarra" vacia).
 const FleetContext = createContext(null);
@@ -47,6 +48,10 @@ export function FleetProvider({ children }) {
   // --- Aviso si el chofer NO dio permiso de background ---
   const [backgroundOk, setBackgroundOk] = useState(true);
 
+  // --- Datos que vienen de la tarea de fondo via store compartido ---
+  const [parada, setParada] = useState(null);   // parada mas cercana
+  const [avgSpeed, setAvgSpeed] = useState(0);   // velocidad reportada por la tarea
+
   // ------------------------------------------------------------------
   //  Escuchamos al socket SOLO mientras hay sesion iniciada.
   //  Cuando unitId cambia (login), nos suscribimos; al salir, limpiamos.
@@ -59,8 +64,6 @@ export function FleetProvider({ children }) {
         setUnits(event.state.units);
         setGaps(event.state.gaps);
         setTotalOnRoute(event.state.totalOnRoute);
-      } else if (event.type === 'status') {
-        setConnected(event.connected);
       } else if (event.type === 'sos_alert') {
         // id unico para que la pantalla detecte "llego una alerta nueva".
         setSosAlert({ ...event, id: `${event.unitId}-${event.timestamp}` });
@@ -85,6 +88,32 @@ export function FleetProvider({ children }) {
     return () => {
       unsubSocket();
       unsubPos();
+    };
+  }, [unitId]);
+
+  // ------------------------------------------------------------------
+  //  Conexion REAL desde la tarea de fondo (que vive en otro contexto JS).
+  //  La tarea escribe su ultimo envio en un archivo; aca lo leemos cada 3s.
+  //  "EN VIVO" = hubo un envio exitoso en los ultimos 10 segundos.
+  //  Asi el indicador refleja lo que de verdad esta enviando la tarea,
+  //  no el socket (distinto) de la UI.
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    if (!unitId) return undefined;
+    let activo = true;
+    const revisar = async () => {
+      const est = await leerEstado();
+      if (!activo || !est) return; // sin lectura valida, mantenemos lo anterior
+      const reciente = !!est.enviado && Date.now() - (est.ts || 0) < 10000;
+      setConnected(reciente);
+      if (est.parada) setParada(est.parada);
+      if (typeof est.speed === 'number') setAvgSpeed(est.speed);
+    };
+    revisar();
+    const id = setInterval(revisar, 3000);
+    return () => {
+      activo = false;
+      clearInterval(id);
     };
   }, [unitId]);
 
@@ -122,6 +151,8 @@ export function FleetProvider({ children }) {
     setConnected(false);
     setMessages([]);
     setSosAlert(null);
+    setParada(null);
+    setAvgSpeed(0);
   }, []);
 
   // ------------------------------------------------------------------
@@ -156,6 +187,8 @@ export function FleetProvider({ children }) {
     connected,
     myPosition,
     backgroundOk,
+    parada,
+    avgSpeed,
     messages,
     sosAlert,
     login,

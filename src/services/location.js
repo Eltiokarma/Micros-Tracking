@@ -22,7 +22,8 @@ import { AppState } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { sendGps, isConnected } from './socket';
-import { calcularRouteProgress } from './routeProgress';
+import { calcularRouteProgress, paradaMasCercana } from './routeProgress';
+import { escribirEstado } from './sharedStatus';
 
 // Nombre unico de la tarea. El sistema la identifica por este string.
 export const LOCATION_TASK = 'r14-location-task';
@@ -90,12 +91,25 @@ function manejarUbicacion({ data, error }) {
 
   // 2) Enviamos al servidor por WebSocket (si esta conectado).
   const enviado = sendGps(lastPosition);
+  const conectado = isConnected();
 
   // [DIAG] En cada lectura: confirma que la tarea CORRE y si el ws esta vivo.
   // Si esto NO aparece en el log -> la tarea no arranca (H1).
   // Si aparece con ws=false / enviado=false -> contexto/socket separado (H2).
-  console.log('[diag] tarea GPS fired | ws.conectado=' + isConnected() + ' | sendGps.enviado=' + enviado +
+  console.log('[diag] tarea GPS fired | ws.conectado=' + conectado + ' | sendGps.enviado=' + enviado +
     ' | lat=' + lastPosition.lat.toFixed(5) + ' lng=' + lastPosition.lng.toFixed(5));
+
+  // 3) Compartimos el estado con la UI (vive en OTRO contexto JS) via archivo.
+  //    Asi la pantalla puede mostrar "EN VIVO" y la parada mas cercana aunque
+  //    no comparta el WebSocket de esta tarea. (No toca el envio de arriba.)
+  escribirEstado({
+    ts: Date.now(),
+    connected: conectado,
+    enviado,
+    routeProgress: lastPosition.routeProgress,
+    speed: lastPosition.speed,
+    parada: paradaMasCercana(lastPosition.lat, lastPosition.lng),
+  });
 }
 
 // Registro DEFENSIVO: esto corre al cargar el modulo (al arrancar la app).

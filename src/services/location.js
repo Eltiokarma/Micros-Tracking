@@ -56,7 +56,8 @@ export function getLastPosition() {
 //  bien temprano, en App.js). Aca adentro NO uses hooks de React: esto puede
 //  correr cuando la interfaz ni siquiera esta visible.
 // ============================================================================
-TaskManager.defineTask(LOCATION_TASK, ({ data, error }) => {
+// El cuerpo de la tarea, como funcion nombrada (mas facil de envolver seguro).
+function manejarUbicacion({ data, error }) {
   if (error) {
     console.warn('[location] error en la tarea:', error.message);
     return;
@@ -88,7 +89,20 @@ TaskManager.defineTask(LOCATION_TASK, ({ data, error }) => {
 
   // 2) Enviamos al servidor por WebSocket (si esta conectado).
   sendGps(lastPosition);
-});
+}
+
+// Registro DEFENSIVO: esto corre al cargar el modulo (al arrancar la app).
+// Si el modulo nativo no estuviera listo o defineTask fallara, lo capturamos
+// para que NUNCA tumbe la app antes de dibujar la primera pantalla.
+try {
+  if (TaskManager && typeof TaskManager.defineTask === 'function') {
+    TaskManager.defineTask(LOCATION_TASK, manejarUbicacion);
+  } else {
+    console.warn('[location] TaskManager no disponible; no se registro la tarea de GPS.');
+  }
+} catch (e) {
+  console.warn('[location] no se pudo registrar la tarea de GPS:', e?.message || e);
+}
 
 // ============================================================================
 //  PERMISOS

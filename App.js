@@ -145,14 +145,37 @@ function Root() {
 }
 
 export default function App() {
-  // Cargamos las fuentes antes de pintar. Mientras tanto, fondo oscuro.
-  const [fontsLoaded] = useFonts({
+  // Cargamos las fuentes reales. useFonts devuelve [cargadas, error].
+  // IMPORTANTE: ahora SI leemos el error y NO bloqueamos la app si falla.
+  const [fontsLoaded, fontError] = useFonts({
     ArchivoBlack_400Regular,
     JetBrainsMono_400Regular,
     JetBrainsMono_700Bold,
   });
 
-  if (!fontsLoaded) {
+  // Red de seguridad: si las fuentes tardan demasiado (o se quedan colgadas),
+  // a los 4 segundos seguimos igual con la fuente del sistema. Asi la app
+  // NUNCA queda atrapada para siempre en la pantalla azul por las fuentes.
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setTimedOut(true), 4000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Si las fuentes fallaron, lo dejamos anotado en el log (visible por ADB)
+  // pero seguimos adelante: la app usara la fuente del sistema.
+  useEffect(() => {
+    if (fontError) {
+      console.warn('[App] Las fuentes no cargaron; sigo con la fuente del sistema:', fontError?.message || fontError);
+    }
+  }, [fontError]);
+
+  // La app esta lista para pintar si: las fuentes cargaron, O fallaron, O paso
+  // el tiempo de espera. Cualquiera de las tres nos saca de la pantalla azul.
+  const listo = fontsLoaded || !!fontError || timedOut;
+
+  if (!listo) {
+    // Solo brevemente (max ~4s) mientras las fuentes cargan.
     return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
   }
 

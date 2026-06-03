@@ -17,12 +17,18 @@ export default function GhostTimers({ userPos }) {
   return (
     <View
       style={{
-        backgroundColor: 'rgba(10,26,46,0.92)',
-        borderTopWidth: 1,
+        backgroundColor: colors.panel,
+        borderWidth: 1,
         borderColor: colors.line,
-        paddingHorizontal: 12,
-        paddingTop: 8,
+        borderRadius: 14,
+        paddingHorizontal: 14,
+        paddingTop: 10,
         paddingBottom: 12,
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOpacity: 0.25,
+        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 2 },
       }}
     >
       <Text

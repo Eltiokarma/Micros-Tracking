@@ -39,9 +39,15 @@ function Carousel() {
   const { sosAlert, unitId } = useFleet();
   const pagerRef = useRef(null);
   const [page, setPage] = useState(1); // arrancamos en RUTA (la pantalla central)
+  const [fullscreen, setFullscreen] = useState(false); // mapa a pantalla completa
 
   // flash = { title, subtitle } o null. Lo dispara mi propio SOS o el de otros.
   const [flash, setFlash] = useState(null);
+
+  // Por las dudas: si salimos de la pestaña del mapa, cerramos pantalla completa.
+  useEffect(() => {
+    if (page !== 2 && fullscreen) setFullscreen(false);
+  }, [page, fullscreen]);
 
   // El flash se apaga solo a los 2 segundos.
   useEffect(() => {
@@ -66,6 +72,7 @@ function Carousel() {
         ref={pagerRef}
         style={{ flex: 1 }}
         initialPage={1}
+        scrollEnabled={!fullscreen} // en pantalla completa el mapa maneja TODO el gesto
         onPageSelected={(e) => setPage(e.nativeEvent.position)}
       >
         <View key="chat" style={{ flex: 1 }}>
@@ -75,17 +82,21 @@ function Carousel() {
           <RouteScreen onFireSos={() => setFlash({ title: 'SOS', subtitle: 'ALERTA ENVIADA' })} />
         </View>
         <View key="mapa" style={{ flex: 1 }}>
-          {/* active: el mapa solo carga/refresca cuando estas en esta pestaña */}
+          {/* active: el mapa solo carga/refresca cuando estas en esta pestaña.
+              fullscreen: preview (no captura gestos) vs pantalla completa. */}
           <MapScreen
             active={page === 2}
-            onSwipe={(dir) => goTo(dir === 'next' ? page + 1 : page - 1)}
+            fullscreen={fullscreen}
+            onToggleFullscreen={setFullscreen}
           />
         </View>
       </PagerView>
 
       {/* Navegacion: 3 botones GRANDES y faciles de tocar para cambiar de tarjeta.
           Es la forma confiable (el swipe queda como bonus). Ocupa todo el ancho:
-          cada boton es un objetivo tactil de 1/3 de pantalla. */}
+          cada boton es un objetivo tactil de 1/3 de pantalla.
+          Se oculta en pantalla completa del mapa (ahi manda el boton X). */}
+      {!fullscreen && (
       <View style={styles.topNav}>
         {LABELS.map((label, i) => {
           const activo = i === page;
@@ -115,6 +126,7 @@ function Carousel() {
           );
         })}
       </View>
+      )}
 
       {/* Flash rojo de SOS a pantalla completa */}
       {flash && (

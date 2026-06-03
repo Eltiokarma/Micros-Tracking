@@ -1,25 +1,27 @@
 // ============================================================================
 //  RouteScreen: la pantalla central (la que mas mira el chofer).
 // ============================================================================
-//  Une los 4 componentes: ContextHeader (arriba), dos BigTime (brechas
-//  adelante/atras), el Semaphore (en medio) y el SosSlider (abajo).
-//  Los datos salen del FleetContext (useFleet): no hay nada "hardcodeado".
+//  ContextHeader (parada + velocidad), brechas adelante/atras (BigTime),
+//  Semaphore, los timers de prueba a cada fantasma (ETA grande) y el SOS.
+//  El contenido va en ScrollView para que nunca se apriete; el SOS queda fijo
+//  abajo. Todo sale de useFleet (sin datos hardcodeados).
 // ============================================================================
 
 import React from 'react';
-import { View } from 'react-native';
+import { View, ScrollView } from 'react-native';
 import { useFleet } from '../context/FleetContext';
 import { computeStatus, parseGap } from '../utils/status';
 import { TARGET_GAP_SEC } from '../config/coop';
+import { MODO_PRUEBA_FANTASMAS } from '../config/fantasmas';
 import colors from '../theme/colors';
 import ContextHeader from '../components/ContextHeader';
 import BigTime from '../components/BigTime';
 import Semaphore from '../components/Semaphore';
 import SosSlider from '../components/SosSlider';
+import GhostTimers from '../components/GhostTimers';
 
 export default function RouteScreen({ onFireSos }) {
-  // parada y avgSpeed vienen del store compartido (lo escribe la tarea de fondo).
-  const { miGap, sendSos, parada, avgSpeed } = useFleet();
+  const { miGap, sendSos, parada, avgSpeed, userPos } = useFleet();
 
   const front = miGap?.toAhead || '--:--';
   const back = miGap?.toBehind || '--:--';
@@ -28,25 +30,35 @@ export default function RouteScreen({ onFireSos }) {
   const statusColor = { red: colors.red, yellow: colors.yellow, green: colors.green }[status];
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg, paddingHorizontal: 16, paddingTop: 56, paddingBottom: 24 }}>
-      {/* Arriba: parada mas cercana + velocidad */}
-      <ContextHeader parada={parada} avgSpeed={avgSpeed} />
+    <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: 56 }}>
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12, gap: 14 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Arriba: parada mas cercana + velocidad */}
+        <ContextHeader parada={parada} avgSpeed={avgSpeed} />
 
-      {/* Centro: brechas + semaforo, repartidos en el espacio disponible */}
-      <View style={{ flex: 1, justifyContent: 'space-around', alignItems: 'center' }}>
-        <BigTime label="+1 adelante" value={front} color={statusColor} />
-        <Semaphore status={status} />
-        <BigTime label="-1 atras" value={back} color={statusColor} />
+        {/* Brechas + semaforo */}
+        <View style={{ alignItems: 'center', gap: 8, marginTop: 4 }}>
+          <BigTime label="+1 adelante" value={front} color={statusColor} />
+          <Semaphore status={status} />
+          <BigTime label="-1 atras" value={back} color={statusColor} />
+        </View>
+
+        {/* Timers de prueba: tiempo estimado a cada conductor fantasma */}
+        {MODO_PRUEBA_FANTASMAS && <GhostTimers userPos={userPos} />}
+      </ScrollView>
+
+      {/* SOS deslizable, fijo abajo. Al dispararse: envia al servidor Y flash. */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24 }}>
+        <SosSlider
+          status={status}
+          onFire={() => {
+            sendSos();
+            if (onFireSos) onFireSos();
+          }}
+        />
       </View>
-
-      {/* Abajo: SOS deslizable. Al dispararse: envia al servidor Y muestra el flash. */}
-      <SosSlider
-        status={status}
-        onFire={() => {
-          sendSos(); // envia { type:'sos', lat, lng, timestamp } por WebSocket
-          if (onFireSos) onFireSos(); // flash rojo inmediato a pantalla completa
-        }}
-      />
     </View>
   );
 }

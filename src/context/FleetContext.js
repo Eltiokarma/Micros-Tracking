@@ -74,15 +74,30 @@ export function FleetProvider({ children }) {
         // id unico para que la pantalla detecte "llego una alerta nueva".
         setSosAlert({ ...event, id: `${event.unitId}-${event.timestamp}` });
       } else if (event.type === 'chat_msg') {
-        setMessages((prev) => [
-          ...prev,
-          {
-            unitId: event.unitId,
-            driverName: event.driverName,
-            text: event.text,
-            timestamp: event.timestamp,
-          },
-        ]);
+        setMessages((prev) => {
+          // Evitar duplicar el eco local del propio mensaje: el servidor
+          // reenvia el chat_msg conservando unitId + timestamp + text.
+          const yaEsta = prev.some(
+            (m) => m.unitId === event.unitId && m.timestamp === event.timestamp && m.text === event.text
+          );
+          if (yaEsta) {
+            // marcamos el local como confirmado (deja de ser "optimista")
+            return prev.map((m) =>
+              m.local && m.unitId === event.unitId && m.timestamp === event.timestamp
+                ? { ...m, local: false }
+                : m
+            );
+          }
+          return [
+            ...prev,
+            {
+              unitId: event.unitId,
+              driverName: event.driverName,
+              text: event.text,
+              timestamp: event.timestamp,
+            },
+          ];
+        });
       }
     });
 
@@ -198,9 +213,18 @@ export function FleetProvider({ children }) {
   }, []);
 
   const sendChat = useCallback((text) => {
-    const ok = socket.sendChat(text);
+    const limpio = (text || '').trim();
+    if (!limpio) return;
+    const ts = Date.now();
+    const ok = socket.sendChat(limpio, ts);
+    // Eco local OPTIMISTA: mostramos el mensaje propio al instante, sin esperar
+    // el rebote del servidor (que con una sola unidad podria no llegar nunca).
+    setMessages((prev) => [
+      ...prev,
+      { unitId, driverName, text: limpio, timestamp: ts, local: true },
+    ]);
     console.log('[diag] sendChat via UI socket | ws.conectado=' + socket.isConnected() + ' | enviado=' + ok);
-  }, []);
+  }, [unitId, driverName]);
 
   // ------------------------------------------------------------------
   //  Atajos utiles para las pantallas:

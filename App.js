@@ -75,43 +75,45 @@ function Carousel() {
           <RouteScreen onFireSos={() => setFlash({ title: 'SOS', subtitle: 'ALERTA ENVIADA' })} />
         </View>
         <View key="mapa" style={{ flex: 1 }}>
-          {/* onSwipe: el WebView avisa un gesto horizontal y cambiamos de tarjeta */}
-          <MapScreen onSwipe={(dir) => goTo(dir === 'next' ? page + 1 : page - 1)} />
+          {/* active: el mapa solo carga/refresca cuando estas en esta pestaña */}
+          <MapScreen
+            active={page === 2}
+            onSwipe={(dir) => goTo(dir === 'next' ? page + 1 : page - 1)}
+          />
         </View>
       </PagerView>
 
-      {/* Overlay superior: dots + etiqueta. box-none deja pasar toques al mapa. */}
-      <View pointerEvents="box-none" style={styles.topOverlay}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 36 }}>
-          {[0, 1, 2].map((i) => (
-            <Pressable
-              key={i}
-              onPress={() => goTo(i)}
-              style={{ width: 44, height: 36, alignItems: 'center', justifyContent: 'center' }}
-            >
+      {/* Navegacion: 3 botones GRANDES y faciles de tocar para cambiar de tarjeta.
+          Es la forma confiable (el swipe queda como bonus). Ocupa todo el ancho:
+          cada boton es un objetivo tactil de 1/3 de pantalla. */}
+      <View style={styles.topNav}>
+        {LABELS.map((label, i) => {
+          const activo = i === page;
+          return (
+            <Pressable key={label} onPress={() => goTo(i)} style={styles.navItem}>
               <View
                 style={{
-                  width: i === page ? 24 : 10,
-                  height: 10,
-                  borderRadius: 5,
-                  backgroundColor: i === page ? colors.bright : colors.line,
+                  width: activo ? 30 : 16,
+                  height: 16,
+                  borderRadius: 8,
+                  backgroundColor: activo ? colors.bright : colors.line,
+                  marginBottom: 5,
                 }}
               />
+              <Text
+                style={{
+                  fontFamily: mono,
+                  fontSize: 11,
+                  letterSpacing: 1.5,
+                  color: activo ? colors.white : colors.dim,
+                  textTransform: 'uppercase',
+                }}
+              >
+                {label}
+              </Text>
             </Pressable>
-          ))}
-        </View>
-        <Text
-          style={{
-            fontFamily: mono,
-            fontSize: 9,
-            letterSpacing: 2,
-            color: colors.dim,
-            textTransform: 'uppercase',
-            opacity: 0.7,
-          }}
-        >
-          {LABELS[page]}
-        </Text>
+          );
+        })}
       </View>
 
       {/* Flash rojo de SOS a pantalla completa */}
@@ -141,7 +143,11 @@ function Carousel() {
 
 // Decide que mostrar segun haya sesion o no.
 function Root() {
-  const { unitId } = useFleet();
+  const { unitId, sessionChecked } = useFleet();
+  // Mientras leemos la sesion guardada, fondo oscuro (evita parpadear el login).
+  if (!sessionChecked) {
+    return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
+  }
   return unitId ? <Carousel /> : <LoginScreen />;
 }
 
@@ -189,14 +195,24 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  topOverlay: {
+  topNav: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
+    flexDirection: 'row',
     paddingTop: 8,
-    alignItems: 'center',
+    paddingBottom: 8,
+    backgroundColor: 'rgba(10,26,46,0.92)',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
     zIndex: 10,
+  },
+  navItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
   },
   sosFlash: {
     ...StyleSheet.absoluteFillObject,

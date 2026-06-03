@@ -23,7 +23,7 @@ import colors from '../theme/colors';
 import { mono, black } from '../theme/fonts';
 
 export default function ChatScreen() {
-  const { messages, sendChat, unitId } = useFleet();
+  const { messages, sendChat, unitId, logout } = useFleet();
   const [texto, setTexto] = useState('');
   const scrollRef = useRef(null);
 
@@ -45,19 +45,46 @@ export default function ChatScreen() {
       style={{ flex: 1, backgroundColor: colors.bg }}
     >
       <View style={{ flex: 1, paddingTop: 56 }}>
-        <Text
+        {/* Encabezado: titulo + boton de cerrar sesion (para cambiar de usuario) */}
+        <View
           style={{
-            fontFamily: mono,
-            fontSize: 11,
-            letterSpacing: 2,
-            color: colors.dim,
-            textTransform: 'uppercase',
-            textAlign: 'center',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingHorizontal: 12,
             marginBottom: 12,
           }}
         >
-          Chat de la ruta
-        </Text>
+          <Text style={{ fontFamily: mono, fontSize: 10, color: colors.dim }} numberOfLines={1}>
+            {unitId ? `Sesion: ${unitId}` : ''}
+          </Text>
+          <Text
+            style={{
+              fontFamily: mono,
+              fontSize: 11,
+              letterSpacing: 2,
+              color: colors.dim,
+              textTransform: 'uppercase',
+            }}
+          >
+            Chat de la ruta
+          </Text>
+          <Pressable
+            onPress={logout}
+            style={({ pressed }) => ({
+              paddingVertical: 4,
+              paddingHorizontal: 10,
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: colors.line,
+              backgroundColor: pressed ? colors.panel : 'transparent',
+            })}
+          >
+            <Text style={{ fontFamily: mono, fontSize: 10, letterSpacing: 1, color: colors.red, textTransform: 'uppercase' }}>
+              Salir
+            </Text>
+          </Pressable>
+        </View>
 
         <ScrollView ref={scrollRef} contentContainerStyle={{ padding: 16, gap: 10 }}>
           {messages.length === 0 && (

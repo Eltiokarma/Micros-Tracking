@@ -22,6 +22,8 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import * as socket from './../services/socket';
 import * as location from './../services/location';
 import { leerEstado } from './../services/sharedStatus';
+import { guardarSesion, leerSesion, borrarSesion } from './../services/session';
+import { FANTASMAS, MODO_PRUEBA_FANTASMAS } from './../config/fantasmas';
 
 // 1) Creamos el contexto (la "pizarra" vacia).
 const FleetContext = createContext(null);
@@ -51,6 +53,10 @@ export function FleetProvider({ children }) {
   // --- Datos que vienen de la tarea de fondo via store compartido ---
   const [parada, setParada] = useState(null);   // parada mas cercana
   const [avgSpeed, setAvgSpeed] = useState(0);   // velocidad reportada por la tarea
+  const [userPos, setUserPos] = useState(null);  // mi posicion {lat,lng} (cruza contextos)
+
+  // --- Sesion recordada: false hasta que terminamos de leer la sesion guardada ---
+  const [sessionChecked, setSessionChecked] = useState(false);
 
   // ------------------------------------------------------------------
   //  Escuchamos al socket SOLO mientras hay sesion iniciada.
@@ -108,6 +114,9 @@ export function FleetProvider({ children }) {
       setConnected(reciente);
       if (est.parada) setParada(est.parada);
       if (typeof est.speed === 'number') setAvgSpeed(est.speed);
+      if (est.lat != null && est.lng != null) {
+        setUserPos({ lat: est.lat, lng: est.lng, routeProgress: est.routeProgress, speed: est.speed });
+      }
     };
     revisar();
     const id = setInterval(revisar, 3000);
@@ -128,6 +137,9 @@ export function FleetProvider({ children }) {
     setUnitId(id);
     setDriverName(id);
 
+    // 0) Recordamos la sesion para entrar directo la proxima vez.
+    guardarSesion(id);
+
     // 1) Abrimos el WebSocket y nos identificamos.
     socket.connect(id, id);
 
@@ -140,6 +152,7 @@ export function FleetProvider({ children }) {
   //  logout(): cerramos todo de forma ordenada.
   // ------------------------------------------------------------------
   const logout = useCallback(async () => {
+    await borrarSesion(); // olvidar la sesion para que pida usuario de nuevo
     await location.detenerRastreo();
     socket.disconnect();
     setUnitId(null);
@@ -153,7 +166,26 @@ export function FleetProvider({ children }) {
     setSosAlert(null);
     setParada(null);
     setAvgSpeed(0);
+    setUserPos(null);
   }, []);
+
+  // ------------------------------------------------------------------
+  //  Restaurar sesion al abrir la app: si hay un nombre guardado, entramos
+  //  directo (sin volver a escribir el usuario). No bloqueamos: marcamos
+  //  sessionChecked y disparamos el login en segundo plano.
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    let activo = true;
+    (async () => {
+      const nombre = await leerSesion();
+      if (!activo) return;
+      if (nombre) login(nombre); // arranca conexion + GPS; setUnitId muestra el main
+      setSessionChecked(true);
+    })();
+    return () => {
+      activo = false;
+    };
+  }, [login]);
 
   // ------------------------------------------------------------------
   //  Acciones de SOS y chat (usan mi posicion local actual).
@@ -176,7 +208,9 @@ export function FleetProvider({ children }) {
   //  otros = las demas combis (para los puntos azules del mapa).
   // ------------------------------------------------------------------
   const miGap = unitId ? gaps[unitId] || null : null;
-  const otros = units.filter((u) => u.unitId !== unitId);
+  const otrosReales = units.filter((u) => u.unitId !== unitId);
+  // En modo prueba agregamos los conductores fantasma (estaticos) a la flota.
+  const otros = MODO_PRUEBA_FANTASMAS ? [...otrosReales, ...FANTASMAS] : otrosReales;
 
   // El "value" es lo que queda escrito en la pizarra para todos.
   const value = {
@@ -192,6 +226,8 @@ export function FleetProvider({ children }) {
     backgroundOk,
     parada,
     avgSpeed,
+    userPos,
+    sessionChecked,
     messages,
     sosAlert,
     login,

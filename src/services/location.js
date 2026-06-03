@@ -106,6 +106,8 @@ function manejarUbicacion({ data, error }) {
     ts: Date.now(),
     connected: conectado,
     enviado,
+    lat: lastPosition.lat,
+    lng: lastPosition.lng,
     routeProgress: lastPosition.routeProgress,
     speed: lastPosition.speed,
     parada: paradaMasCercana(lastPosition.lat, lastPosition.lng),

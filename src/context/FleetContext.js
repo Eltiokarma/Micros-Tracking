@@ -18,11 +18,12 @@
 //    - lo expone todo via el hook useFleet()
 // ============================================================================
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import * as socket from './../services/socket';
 import * as location from './../services/location';
 import { leerEstado } from './../services/sharedStatus';
 import { guardarSesion, leerSesion, borrarSesion } from './../services/session';
+import { guardarMensajes, leerMensajesDeHoy } from './../services/chatStore';
 import { FANTASMAS, MODO_PRUEBA_FANTASMAS } from './../config/fantasmas';
 
 // 1) Creamos el contexto (la "pizarra" vacia).
@@ -57,6 +58,9 @@ export function FleetProvider({ children }) {
 
   // --- Sesion recordada: false hasta que terminamos de leer la sesion guardada ---
   const [sessionChecked, setSessionChecked] = useState(false);
+
+  // Para no persistir el chat antes de haber cargado los mensajes del dia.
+  const chatCargado = useRef(false);
 
   // ------------------------------------------------------------------
   //  Escuchamos al socket SOLO mientras hay sesion iniciada.
@@ -177,7 +181,8 @@ export function FleetProvider({ children }) {
     setTotalOnRoute(0);
     setMyPosition(null);
     setConnected(false);
-    setMessages([]);
+    // NO borramos los mensajes: el chat del dia se mantiene aunque cambie el
+    // usuario (son avisos de la jornada). Se limpian solos al cambiar de dia.
     setSosAlert(null);
     setParada(null);
     setAvgSpeed(0);
@@ -201,6 +206,28 @@ export function FleetProvider({ children }) {
       activo = false;
     };
   }, [login]);
+
+  // ------------------------------------------------------------------
+  //  Chat de la jornada: al abrir cargamos los mensajes de HOY (descartando
+  //  los de dias anteriores), y persistimos en cada cambio. Asi un aviso
+  //  sigue visible aunque se cierre/reabra la app o se cambie de usuario.
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    let activo = true;
+    (async () => {
+      const guardados = await leerMensajesDeHoy();
+      if (!activo) return;
+      if (guardados.length) setMessages(guardados);
+      chatCargado.current = true; // recien ahora permitimos persistir
+    })();
+    return () => {
+      activo = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (chatCargado.current) guardarMensajes(messages);
+  }, [messages]);
 
   // ------------------------------------------------------------------
   //  Acciones de SOS y chat (usan mi posicion local actual).

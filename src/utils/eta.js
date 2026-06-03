@@ -32,4 +32,17 @@ export function formatoMMSS(seg) {
   return m + ':' + String(r).padStart(2, '0');
 }
 
-export default { distanciaMetros, etaSegundos, formatoMMSS };
+// Estado de proximidad (anti-correteo) segun el ETA a la unidad mas cercana:
+//   rojo    = muy pegado (vas a corretearte)   -> ETA <= 60 s
+//   amarillo= acercandote                       -> ETA <= 150 s
+//   verde   = hay hueco / vas bien              -> ETA  > 150 s
+// Umbrales pensados para la PRUEBA caminando (5 km/h); ajustables luego para
+// la velocidad real del vehiculo.
+export function estadoProximidadPorEta(seg) {
+  if (seg == null || !isFinite(seg)) return 'green';
+  if (seg <= 60) return 'red';
+  if (seg <= 150) return 'yellow';
+  return 'green';
+}
+
+export default { distanciaMetros, etaSegundos, formatoMMSS, estadoProximidadPorEta };

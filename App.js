@@ -15,7 +15,7 @@
 import './src/services/location';
 
 import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, BackHandler } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import PagerView from 'react-native-pager-view';
 import { useFonts } from 'expo-font';
@@ -48,6 +48,20 @@ function Carousel() {
   useEffect(() => {
     if (page !== 2 && fullscreen) setFullscreen(false);
   }, [page, fullscreen]);
+
+  // Boton "atras" de Android: si el mapa esta en pantalla completa, lo cerramos
+  // (volvemos al preview) en vez de cerrar la app. Si no, comportamiento normal.
+  useEffect(() => {
+    const onBack = () => {
+      if (fullscreen) {
+        setFullscreen(false);
+        return true; // consumimos el evento: NO cierra la app
+      }
+      return false; // dejamos el comportamiento normal de Android
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [fullscreen]);
 
   // El flash se apaga solo a los 2 segundos.
   useEffect(() => {

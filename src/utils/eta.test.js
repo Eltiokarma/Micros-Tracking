@@ -1,4 +1,4 @@
-import { distanciaMetros, etaSegundos, formatoMMSS } from './eta';
+import { distanciaMetros, etaSegundos, formatoMMSS, estadoProximidadPorEta } from './eta';
 
 describe('distanciaMetros', () => {
   it('es ~0 en el mismo punto', () => {
@@ -30,5 +30,19 @@ describe('formatoMMSS', () => {
   });
   it('muestra --:-- si no hay dato', () => {
     expect(formatoMMSS(null)).toBe('--:--');
+  });
+});
+
+describe('estadoProximidadPorEta', () => {
+  it('rojo si esta muy pegado (<=60s)', () => {
+    expect(estadoProximidadPorEta(30)).toBe('red');
+    expect(estadoProximidadPorEta(60)).toBe('red');
+  });
+  it('amarillo si se acerca (<=150s)', () => {
+    expect(estadoProximidadPorEta(120)).toBe('yellow');
+  });
+  it('verde si hay hueco (>150s) o no hay dato', () => {
+    expect(estadoProximidadPorEta(300)).toBe('green');
+    expect(estadoProximidadPorEta(null)).toBe('green');
   });
 });

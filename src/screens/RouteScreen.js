@@ -1,24 +1,27 @@
 // ============================================================================
 //  RouteScreen: pantalla central. La ESTRELLA es el anti-correteo grande.
 // ============================================================================
-//  - Toma la unidad MAS CERCANA (de las unidades en ruta, incluidos los
-//    fantasmas de prueba) y muestra EN GRANDE el ETA hacia ella, con el color
-//    del semaforo (verde = hay hueco, amarillo = acercandote, rojo = muy pegado).
-//  - El semaforo queda de apoyo, integrado debajo.
-//  - Abajo, chico y secundario, el resto de las unidades con su ETA.
-//  - SOS deslizable fijo al pie. Todo sale de useFleet.
-//  Reusa la logica de utils/eta.js (distancia, ETA y estado de proximidad).
+//  - Toma la unidad MAS CERCANA (por DISTANCIA A LO LARGO DE LA RUTA, con
+//    respaldo a linea recta) y muestra EN GRANDE el ETA hacia ella, con el
+//    color del semaforo (verde = hay hueco, amarillo = acercandote, rojo = muy
+//    pegado).
+//  - ETA con VELOCIDAD REAL del usuario (con piso) y SUAVIZADO (EMA) para que
+//    el numero no parpadee.
+//  - El semaforo queda de apoyo, debajo. El resto de unidades va chico abajo.
+//  Reusa utils/eta.js y la distancia por ruta de routeProgress.js.
 // ============================================================================
 
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { useFleet } from '../context/FleetContext';
 import {
-  distanciaMetros,
   etaSegundos,
   formatoMMSS,
   estadoProximidadPorEta,
+  velocidadParaEta,
+  emaSiguiente,
 } from '../utils/eta';
+import { distanciaConFallback } from '../services/routeProgress';
 import { VELOCIDAD_PRUEBA_KMH } from '../config/fantasmas';
 import colors from '../theme/colors';
 import { mono, black } from '../theme/fonts';
@@ -30,21 +33,40 @@ import SosSlider from '../components/SosSlider';
 const STATUS_COLOR = { red: colors.red, yellow: colors.yellow, green: colors.green };
 const STATUS_TEXTO = { red: 'Muy pegado', yellow: 'Acercándote', green: 'Hay hueco' };
 
+// MEJORA B: suaviza (EMA) el ETA mostrado. Se reinicia cuando cambia la unidad
+// mas cercana (no tendria sentido suavizar entre unidades distintas).
+function useEtaSuavizado(targetSec, key, alpha = 0.4) {
+  const [shown, setShown] = useState(null);
+  const prevKey = useRef(null);
+  useEffect(() => {
+    const cambioUnidad = prevKey.current !== key;
+    prevKey.current = key;
+    setShown((prev) => emaSiguiente(cambioUnidad ? null : prev, targetSec, alpha));
+  }, [targetSec, key, alpha]);
+  return shown;
+}
+
 export default function RouteScreen({ onFireSos }) {
   const { otros, userPos, sendSos, parada, avgSpeed } = useFleet();
 
-  // Unidades con posicion, ordenadas por distancia a mi (la mas cercana primero).
+  // MEJORA A: velocidad real reciente (con piso); fallback a la fija si aun no hay GPS.
+  const velKmh = velocidadParaEta(userPos?.speed, VELOCIDAD_PRUEBA_KMH);
+
+  // Unidades con posicion, ordenadas por distancia A LO LARGO DE LA RUTA (MEJORA C).
   const conPos = otros.filter((u) => u.lat != null && u.lng != null);
   const ordenadas = userPos
     ? conPos
-        .map((u) => ({ ...u, dist: distanciaMetros(userPos.lat, userPos.lng, u.lat, u.lng) }))
+        .map((u) => ({ ...u, dist: distanciaConFallback(userPos.lat, userPos.lng, u.lat, u.lng) }))
         .sort((a, b) => a.dist - b.dist)
     : conPos.map((u) => ({ ...u, dist: null }));
 
   const nearest = ordenadas[0] || null;
-  const etaSec = nearest && nearest.dist != null ? etaSegundos(nearest.dist, VELOCIDAD_PRUEBA_KMH) : null;
-  const etaStr = formatoMMSS(etaSec);
-  const status = estadoProximidadPorEta(etaSec);
+  const etaSecCrudo = nearest && nearest.dist != null ? etaSegundos(nearest.dist, velKmh) : null;
+
+  // Suavizamos el ETA del mas cercano (el numero grande).
+  const etaSuave = useEtaSuavizado(etaSecCrudo, nearest ? nearest.unitId : null);
+  const etaStr = formatoMMSS(etaSuave);
+  const status = estadoProximidadPorEta(etaSuave);
   const statusColor = STATUS_COLOR[status];
   const resto = ordenadas.slice(1);
 
@@ -76,7 +98,7 @@ export default function RouteScreen({ onFireSos }) {
           <View style={styles.sec}>
             <Text style={styles.secLabel}>Otras unidades</Text>
             {resto.map((u) => {
-              const e = u.dist != null ? formatoMMSS(etaSegundos(u.dist, VELOCIDAD_PRUEBA_KMH)) : '--:--';
+              const e = u.dist != null ? formatoMMSS(etaSegundos(u.dist, velKmh)) : '--:--';
               return (
                 <View key={u.unitId} style={styles.secRow}>
                   <Text numberOfLines={1} style={styles.secName}>

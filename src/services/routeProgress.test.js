@@ -1,5 +1,11 @@
 // Pruebas de la polilinea de progreso y la parada mas cercana.
-import { calcularRouteProgress, paradaMasCercana, PARADAS } from './routeProgress';
+import {
+  calcularRouteProgress,
+  paradaMasCercana,
+  PARADAS,
+  distanciaEnRutaMetros,
+  distanciaConFallback,
+} from './routeProgress';
 
 describe('calcularRouteProgress', () => {
   it('en la primera parada el progreso es 0', () => {
@@ -42,5 +48,43 @@ describe('paradaMasCercana', () => {
     const p = PARADAS[2]; // Raul Porras
     // ~10 m de corrimiento
     expect(paradaMasCercana(p.lat + 0.00005, p.lng)).toBe(p.nombre);
+  });
+});
+
+describe('distanciaEnRutaMetros (MEJORA C)', () => {
+  it('es ~0 en el mismo punto de la ruta', () => {
+    const p = PARADAS[1];
+    expect(distanciaEnRutaMetros(p.lat, p.lng, p.lat, p.lng)).toBeCloseTo(0, 1);
+  });
+
+  it('da una distancia positiva y finita entre dos paradas', () => {
+    const a = PARADAS[1];
+    const b = PARADAS[3];
+    const d = distanciaEnRutaMetros(a.lat, a.lng, b.lat, b.lng);
+    expect(d).toBeGreaterThan(0);
+    expect(Number.isFinite(d)).toBe(true);
+  });
+
+  it('devuelve null si un punto esta lejos de la ruta (no confiable)', () => {
+    const b = PARADAS[1];
+    expect(distanciaEnRutaMetros(0, 0, b.lat, b.lng)).toBeNull();
+  });
+});
+
+describe('distanciaConFallback (MEJORA C)', () => {
+  it('usa la distancia por ruta cuando es confiable', () => {
+    const a = PARADAS[1];
+    const b = PARADAS[3];
+    expect(distanciaConFallback(a.lat, a.lng, b.lat, b.lng)).toBeCloseTo(
+      distanciaEnRutaMetros(a.lat, a.lng, b.lat, b.lng),
+      5
+    );
+  });
+
+  it('cae a la linea recta cuando la ruta no es confiable', () => {
+    const b = PARADAS[1];
+    const d = distanciaConFallback(0, 0, b.lat, b.lng);
+    expect(d).toBeGreaterThan(0);
+    expect(Number.isFinite(d)).toBe(true);
   });
 });

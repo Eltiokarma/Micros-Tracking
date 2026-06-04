@@ -15,8 +15,8 @@ import React, { useRef, useState, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useFleet } from '../context/FleetContext';
-import { PARADAS, paradaMasCercana } from '../services/routeProgress';
-import { distanciaMetros, etaSegundos, formatoMMSS } from '../utils/eta';
+import { PARADAS, paradaMasCercana, distanciaConFallback } from '../services/routeProgress';
+import { etaSegundos, formatoMMSS, velocidadParaEta } from '../utils/eta';
 import { VELOCIDAD_PRUEBA_KMH } from '../config/fantasmas';
 import colors from '../theme/colors';
 import { mono, black } from '../theme/fonts';
@@ -136,9 +136,11 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
   }, [active, ready, otros]);
 
   // ETA + paradero para la tarjeta de la unidad tocada (reusa la logica existente).
+  // Velocidad real (con piso) y distancia a lo largo de la ruta (con fallback).
+  const velSel = velocidadParaEta(userPos?.speed, VELOCIDAD_PRUEBA_KMH);
   const etaSel =
     selected && userPos
-      ? formatoMMSS(etaSegundos(distanciaMetros(userPos.lat, userPos.lng, selected.lat, selected.lng), VELOCIDAD_PRUEBA_KMH))
+      ? formatoMMSS(etaSegundos(distanciaConFallback(userPos.lat, userPos.lng, selected.lat, selected.lng), velSel))
       : '--:--';
   const stopSel = selected ? paradaMasCercana(selected.lat, selected.lng) : null;
 

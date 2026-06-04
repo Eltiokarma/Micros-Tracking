@@ -19,6 +19,8 @@
 //  la proyeccion la resuelve como inicio (progreso ~0).
 // ============================================================================
 
+import { distanciaMetros } from '../utils/eta';
+
 // --- Paradas del circuito de prueba, EN ORDEN (ida y vuelta) ----------------
 export const PARADAS = [
   { nombre: 'Circunvalación', lat: -15.491641494357753, lng: -70.12169544995002 }, // 1 inicio
@@ -58,10 +60,13 @@ for (let i = 0; i < PTS.length - 1; i++) {
 const TOTAL = CUM[CUM.length - 1] || 1; // longitud total de la polilinea
 
 // ============================================================================
-//  calcularRouteProgress(lat, lng) -> 0..1
+//  proyectar(lat, lng) -> { acumulado, perp }
+//  acumulado = distancia (m) a lo largo de la ruta hasta la proyeccion.
+//  perp      = distancia (m) perpendicular del punto a la ruta. Si es grande,
+//              estas lejos de la ruta y la proyeccion no es confiable.
 // ============================================================================
-export function calcularRouteProgress(lat, lng) {
-  if (PTS.length < 2) return 0;
+function proyectar(lat, lng) {
+  if (PTS.length < 2) return { acumulado: 0, perp: Infinity };
   const p = aXY(lat, lng);
 
   let mejorDist = Infinity;
@@ -88,7 +93,39 @@ export function calcularRouteProgress(lat, lng) {
     }
   }
 
-  return Math.max(0, Math.min(1, mejorAcumulado / TOTAL));
+  return { acumulado: mejorAcumulado, perp: mejorDist };
+}
+
+// ============================================================================
+//  calcularRouteProgress(lat, lng) -> 0..1
+// ============================================================================
+export function calcularRouteProgress(lat, lng) {
+  const { acumulado } = proyectar(lat, lng);
+  return Math.max(0, Math.min(1, acumulado / TOTAL));
+}
+
+// ============================================================================
+//  MEJORA C: distancia A LO LARGO DE LA RUTA (con respaldo a linea recta)
+// ============================================================================
+// Si estas a mas de esta distancia perpendicular de la ruta, la proyeccion no
+// es confiable y conviene usar la linea recta.
+const MAX_PERP_M = 200;
+
+// Distancia (m) entre dos puntos medida A LO LARGO de la polilinea de la ruta.
+// Devuelve null si algun punto esta demasiado lejos de la ruta (no confiable).
+export function distanciaEnRutaMetros(aLat, aLng, bLat, bLng) {
+  const pa = proyectar(aLat, aLng);
+  const pb = proyectar(bLat, bLng);
+  if (pa.perp > MAX_PERP_M || pb.perp > MAX_PERP_M) return null;
+  return Math.abs(pa.acumulado - pb.acumulado);
+}
+
+// Distancia preferida: a lo largo de la ruta si es confiable; si no, Haversine.
+// Asi NUNCA perdemos lo que ya funcionaba (la linea recta) si la ruta falla.
+export function distanciaConFallback(aLat, aLng, bLat, bLng) {
+  const r = distanciaEnRutaMetros(aLat, aLng, bLat, bLng);
+  if (r == null || !isFinite(r)) return distanciaMetros(aLat, aLng, bLat, bLng);
+  return r;
 }
 
 // ============================================================================

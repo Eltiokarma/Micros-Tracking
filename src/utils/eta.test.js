@@ -1,4 +1,12 @@
-import { distanciaMetros, etaSegundos, formatoMMSS, estadoProximidadPorEta } from './eta';
+import {
+  distanciaMetros,
+  etaSegundos,
+  formatoMMSS,
+  estadoProximidadPorEta,
+  velocidadParaEta,
+  emaSiguiente,
+  PISO_VELOCIDAD_KMH,
+} from './eta';
 
 describe('distanciaMetros', () => {
   it('es ~0 en el mismo punto', () => {
@@ -44,5 +52,37 @@ describe('estadoProximidadPorEta', () => {
   it('verde si hay hueco (>150s) o no hay dato', () => {
     expect(estadoProximidadPorEta(300)).toBe('green');
     expect(estadoProximidadPorEta(null)).toBe('green');
+  });
+});
+
+// MEJORA A
+describe('velocidadParaEta', () => {
+  it('usa el fallback si no hay velocidad real', () => {
+    expect(velocidadParaEta(null, 5)).toBe(5);
+    expect(velocidadParaEta(undefined, 5)).toBe(5);
+  });
+  it('aplica el piso cuando estas casi detenido', () => {
+    expect(velocidadParaEta(0, 5)).toBe(PISO_VELOCIDAD_KMH);
+    expect(velocidadParaEta(2, 5)).toBe(PISO_VELOCIDAD_KMH);
+  });
+  it('usa la velocidad real si supera el piso', () => {
+    expect(velocidadParaEta(12, 5)).toBe(12);
+  });
+});
+
+// MEJORA B
+describe('emaSiguiente', () => {
+  it('el primer valor no se suaviza (no hay anterior)', () => {
+    expect(emaSiguiente(null, 200)).toBe(200);
+  });
+  it('suaviza: 0.4*nuevo + 0.6*anterior', () => {
+    expect(emaSiguiente(100, 200, 0.4)).toBeCloseTo(140, 5);
+  });
+  it('deja llegar a 0 cuando ya casi llegaste (<=3s)', () => {
+    expect(emaSiguiente(100, 2, 0.4)).toBe(2);
+    expect(emaSiguiente(100, 0, 0.4)).toBe(0);
+  });
+  it('devuelve null si no hay objetivo', () => {
+    expect(emaSiguiente(100, null)).toBeNull();
   });
 });

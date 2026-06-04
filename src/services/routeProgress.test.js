@@ -1,41 +1,46 @@
-// Pruebas de getTramo: dado un progreso 0..1, que parada actual y siguiente
-// devuelve. Usa la lista PARADAS por defecto (editable).
+// Pruebas de la polilinea de progreso y la parada mas cercana.
+import { calcularRouteProgress, paradaMasCercana, PARADAS } from './routeProgress';
 
-import { getTramo, PARADAS } from './routeProgress';
-
-describe('getTramo', () => {
-  it('al inicio (0): current = Terminal Sur, next = siguiente parada', () => {
-    const t = getTramo(0);
-    expect(t.currentStop).toBe('Terminal Sur');
-    expect(t.nextStop).toBe(PARADAS[1].nombre);
+describe('calcularRouteProgress', () => {
+  it('en la primera parada el progreso es 0', () => {
+    const p = PARADAS[0];
+    expect(calcularRouteProgress(p.lat, p.lng)).toBeCloseTo(0, 2);
   });
 
-  it('a mitad de ruta (0.6): cae en el tramo de la parada con progreso 0.5', () => {
-    const t = getTramo(0.6);
-    expect(t.currentStop).toBe(PARADAS[2].nombre); // progreso 0.5
-    expect(t.nextStop).toBe(PARADAS[3].nombre); // progreso 0.75
+  it('avanza de forma MONOTONA a lo largo de las paradas 1..8', () => {
+    // El punto 9 es identico al 1 (misma esquina), por eso probamos 1..8.
+    const progresos = PARADAS.slice(0, 8).map((p) => calcularRouteProgress(p.lat, p.lng));
+    for (let i = 1; i < progresos.length; i++) {
+      expect(progresos[i]).toBeGreaterThan(progresos[i - 1]);
+    }
   });
 
-  it('justo sobre una parada (0.5): esa parada es la actual', () => {
-    const t = getTramo(0.5);
-    expect(t.currentStop).toBe(PARADAS[2].nombre);
-    expect(t.nextStop).toBe(PARADAS[3].nombre);
+  it('la parada de retorno (Apurimac, #5) esta pasada la mitad', () => {
+    const p = PARADAS[4]; // Apurimac, punto de retorno
+    expect(calcularRouteProgress(p.lat, p.lng)).toBeGreaterThan(0.4);
   });
 
-  it('al final (1): current = Huancane, next = null', () => {
-    const t = getTramo(1);
-    expect(t.currentStop).toBe('Huancane');
-    expect(t.nextStop).toBeNull();
+  it('siempre devuelve un valor dentro de [0,1]', () => {
+    expect(calcularRouteProgress(-15.49, -70.12)).toBeGreaterThanOrEqual(0);
+    expect(calcularRouteProgress(-15.49, -70.12)).toBeLessThanOrEqual(1);
+    // muy lejos de la ruta: igual queda recortado a [0,1]
+    expect(calcularRouteProgress(0, 0)).toBeGreaterThanOrEqual(0);
+    expect(calcularRouteProgress(0, 0)).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('paradaMasCercana', () => {
+  it('en cada parada devuelve su propio nombre', () => {
+    // Probamos 1..8 (el 9 comparte coordenada con el 1).
+    for (let i = 0; i < 8; i++) {
+      const p = PARADAS[i];
+      expect(paradaMasCercana(p.lat, p.lng)).toBe(p.nombre);
+    }
   });
 
-  it('clamp fuera de rango', () => {
-    expect(getTramo(-5).currentStop).toBe('Terminal Sur');
-    expect(getTramo(99).currentStop).toBe('Huancane');
-  });
-
-  it('lista vacia no rompe', () => {
-    const t = getTramo(0.5, []);
-    expect(t.currentStop).toBeNull();
-    expect(t.nextStop).toBeNull();
+  it('a unos metros de una parada, sigue siendo la mas cercana', () => {
+    const p = PARADAS[2]; // Raul Porras
+    // ~10 m de corrimiento
+    expect(paradaMasCercana(p.lat + 0.00005, p.lng)).toBe(p.nombre);
   });
 });

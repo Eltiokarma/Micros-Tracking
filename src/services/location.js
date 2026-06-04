@@ -18,10 +18,12 @@
 //  development build o el APK de EAS. Lo veremos al momento de probar.
 // ============================================================================
 
+import { AppState } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
-import { sendGps } from './socket';
-import { calcularRouteProgress } from './routeProgress';
+import { sendGps, isConnected } from './socket';
+import { calcularRouteProgress, paradaMasCercana } from './routeProgress';
+import { escribirEstado } from './sharedStatus';
 
 // Nombre unico de la tarea. El sistema la identifica por este string.
 export const LOCATION_TASK = 'r14-location-task';
@@ -56,7 +58,8 @@ export function getLastPosition() {
 //  bien temprano, en App.js). Aca adentro NO uses hooks de React: esto puede
 //  correr cuando la interfaz ni siquiera esta visible.
 // ============================================================================
-TaskManager.defineTask(LOCATION_TASK, ({ data, error }) => {
+// El cuerpo de la tarea, como funcion nombrada (mas facil de envolver seguro).
+function manejarUbicacion({ data, error }) {
   if (error) {
     console.warn('[location] error en la tarea:', error.message);
     return;
@@ -87,8 +90,42 @@ TaskManager.defineTask(LOCATION_TASK, ({ data, error }) => {
   emitPosition(lastPosition);
 
   // 2) Enviamos al servidor por WebSocket (si esta conectado).
-  sendGps(lastPosition);
-});
+  const enviado = sendGps(lastPosition);
+  const conectado = isConnected();
+
+  // [DIAG] En cada lectura: confirma que la tarea CORRE y si el ws esta vivo.
+  // Si esto NO aparece en el log -> la tarea no arranca (H1).
+  // Si aparece con ws=false / enviado=false -> contexto/socket separado (H2).
+  console.log('[diag] tarea GPS fired | ws.conectado=' + conectado + ' | sendGps.enviado=' + enviado +
+    ' | lat=' + lastPosition.lat.toFixed(5) + ' lng=' + lastPosition.lng.toFixed(5));
+
+  // 3) Compartimos el estado con la UI (vive en OTRO contexto JS) via archivo.
+  //    Asi la pantalla puede mostrar "EN VIVO" y la parada mas cercana aunque
+  //    no comparta el WebSocket de esta tarea. (No toca el envio de arriba.)
+  escribirEstado({
+    ts: Date.now(),
+    connected: conectado,
+    enviado,
+    lat: lastPosition.lat,
+    lng: lastPosition.lng,
+    routeProgress: lastPosition.routeProgress,
+    speed: lastPosition.speed,
+    parada: paradaMasCercana(lastPosition.lat, lastPosition.lng),
+  });
+}
+
+// Registro DEFENSIVO: esto corre al cargar el modulo (al arrancar la app).
+// Si el modulo nativo no estuviera listo o defineTask fallara, lo capturamos
+// para que NUNCA tumbe la app antes de dibujar la primera pantalla.
+try {
+  if (TaskManager && typeof TaskManager.defineTask === 'function') {
+    TaskManager.defineTask(LOCATION_TASK, manejarUbicacion);
+  } else {
+    console.warn('[location] TaskManager no disponible; no se registro la tarea de GPS.');
+  }
+} catch (e) {
+  console.warn('[location] no se pudo registrar la tarea de GPS:', e?.message || e);
+}
 
 // ============================================================================
 //  PERMISOS
@@ -98,11 +135,13 @@ TaskManager.defineTask(LOCATION_TASK, ({ data, error }) => {
 // ============================================================================
 export async function pedirPermisos() {
   const fg = await Location.requestForegroundPermissionsAsync();
+  console.log('[diag] permiso foreground =', fg.status); // [DIAG]
   if (fg.status !== 'granted') {
     return { ok: false, motivo: 'foreground' }; // sin esto no hay nada que hacer
   }
 
   const bg = await Location.requestBackgroundPermissionsAsync();
+  console.log('[diag] permiso background =', bg.status); // [DIAG]
   if (bg.status !== 'granted') {
     // La app funciona con pantalla encendida, pero avisamos que el rastreo
     // se cortara al bloquear el celular. La UI puede mostrar este aviso.
@@ -113,33 +152,78 @@ export async function pedirPermisos() {
 }
 
 // ============================================================================
+//  ESPERAR A PRIMER PLANO
+//  El foreground service NO se puede arrancar con la app en segundo plano
+//  (Android lo rechaza: "cannot be started while the app is in the background").
+//  El dialogo de permisos —sobre todo el de "ubicacion todo el tiempo", que
+//  abre Ajustes— deja la app en background un instante. Por eso, antes de
+//  arrancar el servicio, esperamos a que la app vuelva a estar "active".
+//  Con un timeout de seguridad para no colgarnos para siempre.
+// ============================================================================
+function esperarPrimerPlano(timeoutMs = 8000) {
+  if (AppState.currentState === 'active') return Promise.resolve();
+  return new Promise((resolve) => {
+    let listo = false;
+    const terminar = () => {
+      if (listo) return;
+      listo = true;
+      sub.remove();
+      clearTimeout(t);
+      resolve();
+    };
+    const sub = AppState.addEventListener('change', (estado) => {
+      if (estado === 'active') terminar();
+    });
+    const t = setTimeout(terminar, timeoutMs); // red de seguridad
+  });
+}
+
+// ============================================================================
 //  ARRANCAR / DETENER EL RASTREO
 // ============================================================================
 export async function iniciarRastreo() {
+  console.log('[diag] iniciarRastreo: pidiendo permisos...'); // [DIAG]
   const permisos = await pedirPermisos();
+  console.log('[diag] iniciarRastreo: permisos =', JSON.stringify(permisos)); // [DIAG]
   if (!permisos.ok) return permisos;
 
   // Si ya estaba corriendo, no lo arrancamos dos veces.
   const yaCorriendo = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK);
+  console.log('[diag] iniciarRastreo: yaCorriendo =', yaCorriendo); // [DIAG]
   if (yaCorriendo) return { ok: true, yaActivo: true };
 
-  await Location.startLocationUpdatesAsync(LOCATION_TASK, {
-    accuracy: Location.Accuracy.High, // GPS preciso (necesario para la calle)
-    timeInterval: 3000,               // cada ~3 segundos (igual que la PWA)
-    distanceInterval: 0,              // 0 = no esperar a moverse X metros; manda por tiempo
+  // Esperar a que la app este en primer plano antes de arrancar el servicio.
+  console.log('[diag] AppState antes de esperar =', AppState.currentState); // [DIAG]
+  await esperarPrimerPlano();
+  console.log('[diag] AppState al arrancar =', AppState.currentState); // [DIAG]
 
-    // pausesUpdatesAutomatically lo dejamos en false: iOS por su cuenta podria
-    // "pausar" si cree que estas quieto. Una combi en semaforo NO debe pausar.
-    pausesUpdatesAutomatically: false,
-    showsBackgroundLocationIndicator: true, // iOS: muestra el indicador azul
+  // [DIAG] Envolvemos startLocationUpdatesAsync para VER el error real si falla.
+  // Logueamos y re-lanzamos: NO cambiamos el comportamiento, solo lo hacemos visible.
+  try {
+    console.log('[diag] llamando startLocationUpdatesAsync...'); // [DIAG]
+    await Location.startLocationUpdatesAsync(LOCATION_TASK, {
+      accuracy: Location.Accuracy.High, // GPS preciso (necesario para la calle)
+      timeInterval: 3000,               // cada ~3 segundos (igual que la PWA)
+      distanceInterval: 0,              // 0 = no esperar a moverse X metros; manda por tiempo
 
-    // --- ESTO es lo que mantiene viva la app con la pantalla apagada ---
-    foregroundService: {
-      notificationTitle: 'R-14 en ruta',
-      notificationBody: 'Compartiendo tu posicion con la cooperativa.',
-      notificationColor: '#2580CF',
-    },
-  });
+      // pausesUpdatesAutomatically lo dejamos en false: iOS por su cuenta podria
+      // "pausar" si cree que estas quieto. Una combi en semaforo NO debe pausar.
+      pausesUpdatesAutomatically: false,
+      showsBackgroundLocationIndicator: true, // iOS: muestra el indicador azul
+
+      // --- ESTO es lo que mantiene viva la app con la pantalla apagada ---
+      foregroundService: {
+        notificationTitle: 'R-14 en ruta',
+        notificationBody: 'Compartiendo tu posicion con la cooperativa.',
+        notificationColor: '#2580CF',
+      },
+    });
+    console.log('[diag] startLocationUpdatesAsync OK (servicio arrancado)'); // [DIAG]
+  } catch (e) {
+    // ESTE es el log clave si es H1: el motivo exacto por el que no arranca.
+    console.warn('[diag] startLocationUpdatesAsync FALLO:', e?.message || e, e?.code || '');
+    throw e; // re-lanzamos para no cambiar el flujo actual
+  }
 
   return { ok: true, background: permisos.background };
 }

@@ -15,7 +15,7 @@
 import './src/services/location';
 
 import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, BackHandler } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import PagerView from 'react-native-pager-view';
 import { useFonts } from 'expo-font';
@@ -39,9 +39,29 @@ function Carousel() {
   const { sosAlert, unitId } = useFleet();
   const pagerRef = useRef(null);
   const [page, setPage] = useState(1); // arrancamos en RUTA (la pantalla central)
+  const [fullscreen, setFullscreen] = useState(false); // mapa a pantalla completa
 
   // flash = { title, subtitle } o null. Lo dispara mi propio SOS o el de otros.
   const [flash, setFlash] = useState(null);
+
+  // Por las dudas: si salimos de la pestaña del mapa, cerramos pantalla completa.
+  useEffect(() => {
+    if (page !== 2 && fullscreen) setFullscreen(false);
+  }, [page, fullscreen]);
+
+  // Boton "atras" de Android: si el mapa esta en pantalla completa, lo cerramos
+  // (volvemos al preview) en vez de cerrar la app. Si no, comportamiento normal.
+  useEffect(() => {
+    const onBack = () => {
+      if (fullscreen) {
+        setFullscreen(false);
+        return true; // consumimos el evento: NO cierra la app
+      }
+      return false; // dejamos el comportamiento normal de Android
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [fullscreen]);
 
   // El flash se apaga solo a los 2 segundos.
   useEffect(() => {
@@ -58,7 +78,7 @@ function Carousel() {
     }
   }, [sosAlert, unitId]);
 
-  const goTo = (i) => pagerRef.current?.setPage(i);
+  const goTo = (i) => pagerRef.current?.setPage(Math.max(0, Math.min(2, i)));
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -66,6 +86,7 @@ function Carousel() {
         ref={pagerRef}
         style={{ flex: 1 }}
         initialPage={1}
+        scrollEnabled={!fullscreen} // en pantalla completa el mapa maneja TODO el gesto
         onPageSelected={(e) => setPage(e.nativeEvent.position)}
       >
         <View key="chat" style={{ flex: 1 }}>
@@ -75,43 +96,51 @@ function Carousel() {
           <RouteScreen onFireSos={() => setFlash({ title: 'SOS', subtitle: 'ALERTA ENVIADA' })} />
         </View>
         <View key="mapa" style={{ flex: 1 }}>
-          <MapScreen />
+          {/* active: el mapa solo carga/refresca cuando estas en esta pestaña.
+              fullscreen: preview (no captura gestos) vs pantalla completa. */}
+          <MapScreen
+            active={page === 2}
+            fullscreen={fullscreen}
+            onToggleFullscreen={setFullscreen}
+          />
         </View>
       </PagerView>
 
-      {/* Overlay superior: dots + etiqueta. box-none deja pasar toques al mapa. */}
-      <View pointerEvents="box-none" style={styles.topOverlay}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 36 }}>
-          {[0, 1, 2].map((i) => (
-            <Pressable
-              key={i}
-              onPress={() => goTo(i)}
-              style={{ width: 44, height: 36, alignItems: 'center', justifyContent: 'center' }}
-            >
+      {/* Navegacion: 3 botones GRANDES y faciles de tocar para cambiar de tarjeta.
+          Es la forma confiable (el swipe queda como bonus). Ocupa todo el ancho:
+          cada boton es un objetivo tactil de 1/3 de pantalla.
+          Se oculta en pantalla completa del mapa (ahi manda el boton X). */}
+      {!fullscreen && (
+      <View style={styles.topNav}>
+        {LABELS.map((label, i) => {
+          const activo = i === page;
+          return (
+            <Pressable key={label} onPress={() => goTo(i)} style={styles.navItem}>
               <View
                 style={{
-                  width: i === page ? 24 : 10,
-                  height: 10,
-                  borderRadius: 5,
-                  backgroundColor: i === page ? colors.bright : colors.line,
+                  width: activo ? 30 : 16,
+                  height: 16,
+                  borderRadius: 8,
+                  backgroundColor: activo ? colors.bright : colors.line,
+                  marginBottom: 5,
                 }}
               />
+              <Text
+                style={{
+                  fontFamily: mono,
+                  fontSize: 11,
+                  letterSpacing: 1.5,
+                  color: activo ? colors.white : colors.dim,
+                  textTransform: 'uppercase',
+                }}
+              >
+                {label}
+              </Text>
             </Pressable>
-          ))}
-        </View>
-        <Text
-          style={{
-            fontFamily: mono,
-            fontSize: 9,
-            letterSpacing: 2,
-            color: colors.dim,
-            textTransform: 'uppercase',
-            opacity: 0.7,
-          }}
-        >
-          {LABELS[page]}
-        </Text>
+          );
+        })}
       </View>
+      )}
 
       {/* Flash rojo de SOS a pantalla completa */}
       {flash && (
@@ -140,19 +169,46 @@ function Carousel() {
 
 // Decide que mostrar segun haya sesion o no.
 function Root() {
-  const { unitId } = useFleet();
+  const { unitId, sessionChecked } = useFleet();
+  // Mientras leemos la sesion guardada, fondo oscuro (evita parpadear el login).
+  if (!sessionChecked) {
+    return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
+  }
   return unitId ? <Carousel /> : <LoginScreen />;
 }
 
 export default function App() {
-  // Cargamos las fuentes antes de pintar. Mientras tanto, fondo oscuro.
-  const [fontsLoaded] = useFonts({
+  // Cargamos las fuentes reales. useFonts devuelve [cargadas, error].
+  // IMPORTANTE: ahora SI leemos el error y NO bloqueamos la app si falla.
+  const [fontsLoaded, fontError] = useFonts({
     ArchivoBlack_400Regular,
     JetBrainsMono_400Regular,
     JetBrainsMono_700Bold,
   });
 
-  if (!fontsLoaded) {
+  // Red de seguridad: si las fuentes tardan demasiado (o se quedan colgadas),
+  // a los 4 segundos seguimos igual con la fuente del sistema. Asi la app
+  // NUNCA queda atrapada para siempre en la pantalla azul por las fuentes.
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setTimedOut(true), 4000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Si las fuentes fallaron, lo dejamos anotado en el log (visible por ADB)
+  // pero seguimos adelante: la app usara la fuente del sistema.
+  useEffect(() => {
+    if (fontError) {
+      console.warn('[App] Las fuentes no cargaron; sigo con la fuente del sistema:', fontError?.message || fontError);
+    }
+  }, [fontError]);
+
+  // La app esta lista para pintar si: las fuentes cargaron, O fallaron, O paso
+  // el tiempo de espera. Cualquiera de las tres nos saca de la pantalla azul.
+  const listo = fontsLoaded || !!fontError || timedOut;
+
+  if (!listo) {
+    // Solo brevemente (max ~4s) mientras las fuentes cargan.
     return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
   }
 
@@ -165,14 +221,24 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  topOverlay: {
+  topNav: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
+    flexDirection: 'row',
     paddingTop: 8,
-    alignItems: 'center',
+    paddingBottom: 8,
+    backgroundColor: 'rgba(10,26,46,0.92)',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
     zIndex: 10,
+  },
+  navItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
   },
   sosFlash: {
     ...StyleSheet.absoluteFillObject,

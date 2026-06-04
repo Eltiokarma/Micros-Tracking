@@ -182,10 +182,10 @@ export function sendSos({ lat = null, lng = null } = {}) {
 // ---------------------------------------------------------------------------
 //  sendChat(): envia un mensaje de texto. El servidor lo reparte como 'chat_msg'.
 // ---------------------------------------------------------------------------
-export function sendChat(text) {
+export function sendChat(text, timestamp = Date.now()) {
   const limpio = (text || '').trim();
   if (!limpio) return false;
-  return send({ type: 'chat', text: limpio, timestamp: Date.now() });
+  return send({ type: 'chat', text: limpio, timestamp });
 }
 
 // ---------------------------------------------------------------------------

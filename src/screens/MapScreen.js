@@ -1,35 +1,31 @@
 // ============================================================================
-//  MapScreen: el mapa, usando Leaflet DENTRO de un WebView.
+//  MapScreen: mapa Leaflet con DOS modos para resolver el conflicto de gestos.
 // ============================================================================
-//  POR QUE ASI:
-//  Un mapa nativo (react-native-maps) en Android usa Google Maps y exige una
-//  API key con tarjeta de credito. En cambio, una WebView es un "mini
-//  navegador" embebido: cargamos ahi el mismo Leaflet + mapas de
-//  OpenStreetMap que ya usabas en la web. Gratis, sin key, y reutiliza tu
-//  conocimiento.
-//
-//  EL PUENTE DE COMUNICACION (lo importante de entender):
-//    React Native  --(inyecta JS)-->  WebView      : le mandamos posiciones
-//    WebView       --(postMessage)-->  React Native : nos avisa "ya cargue"
-//
-//  React Native no puede tocar el mapa directamente; le "inyecta" codigo
-//  JavaScript que ejecuta funciones (window.setMe / window.setOthers) que
-//  definimos dentro del HTML.
+//  - PREVIEW (chico): el mapa se VE pero no captura gestos. Una capa encima
+//    deja que el carrusel reciba el swipe y, al TOCAR, abre el mapa grande.
+//  - PANTALLA COMPLETA: el mapa es 100% interactivo (paneo + zoom nativos de
+//    Leaflet). Un boton "X" cierra y vuelve al preview. (En App.js se desactiva
+//    el swipe del carrusel mientras esta en pantalla completa.)
+//  - Al tocar una unidad (real o fantasma) en pantalla completa, mostramos una
+//    tarjeta con nombre, ETA desde mi posicion y el paradero mas cercano.
+//  - DATOS: el WebView solo se monta/refresca cuando estas en la pestaña.
 // ============================================================================
 
 import React, { useRef, useState, useEffect } from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useFleet } from '../context/FleetContext';
+import { PARADAS, paradaMasCercana } from '../services/routeProgress';
+import { distanciaMetros, etaSegundos, formatoMMSS } from '../utils/eta';
+import { VELOCIDAD_PRUEBA_KMH } from '../config/fantasmas';
 import colors from '../theme/colors';
-import { mono } from '../theme/fonts';
+import { mono, black } from '../theme/fonts';
 
-// Centro inicial: Juliaca (mientras no haya GPS).
-const CENTRO = { lat: -15.4954, lng: -70.1335 };
+const RUTA_JSON = JSON.stringify(PARADAS.map((p) => [p.lat, p.lng]));
+const PARADEROS_JSON = JSON.stringify(
+  PARADAS.slice(0, -1).map((p) => ({ nombre: p.nombre, lat: p.lat, lng: p.lng }))
+);
 
-// --- El HTML que vive dentro de la WebView ---------------------------------
-// Es una pagina web completa y autonoma. Carga Leaflet desde un CDN y define
-// dos funciones globales que React Native llamara: setMe() y setOthers().
 const HTML = `
 <!DOCTYPE html>
 <html>
@@ -39,47 +35,48 @@ const HTML = `
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     html, body, #map { margin: 0; height: 100%; width: 100%; background: ${colors.bg}; }
-    .yo {
-      width: 18px; height: 18px; border-radius: 50%;
-      background: ${colors.white}; border: 3px solid ${colors.bg};
-      box-shadow: 0 0 0 2px ${colors.white}, 0 0 12px ${colors.white};
-    }
-    .otro {
-      width: 16px; height: 16px; border-radius: 50%;
-      background: ${colors.bright}; border: 2px solid #fff;
-      box-shadow: 0 0 8px ${colors.bright};
-    }
+    .yo { width: 18px; height: 18px; border-radius: 50%; background: ${colors.white};
+      border: 3px solid ${colors.bg}; box-shadow: 0 0 0 2px ${colors.white}, 0 0 12px ${colors.white}; }
+    .otro { width: 16px; height: 16px; border-radius: 50%; background: ${colors.bright};
+      border: 2px solid #fff; box-shadow: 0 0 8px ${colors.bright}; }
+    .leaflet-tooltip { background: ${colors.panel}; color: ${colors.white}; border: 1px solid ${colors.line}; }
   </style>
 </head>
 <body>
   <div id="map"></div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    var map = L.map('map', { zoomControl: false, attributionControl: false })
-      .setView([${CENTRO.lat}, ${CENTRO.lng}], 14);
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
+    var map = L.map('map', { zoomControl: false, attributionControl: false });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', {
+      subdomains: 'abcd', maxZoom: 19
     }).addTo(map);
+
+    var ruta = ${RUTA_JSON};
+    var linea = L.polyline(ruta, { color: '${colors.bright}', weight: 4, opacity: 0.85 }).addTo(map);
+    var paraderos = ${PARADEROS_JSON};
+    paraderos.forEach(function (p) {
+      L.circleMarker([p.lat, p.lng], {
+        radius: 5, color: '#fff', weight: 2, fillColor: '${colors.brand}', fillOpacity: 1
+      }).addTo(map).bindTooltip(p.nombre, { direction: 'top' });
+    });
+    map.fitBounds(linea.getBounds(), { padding: [40, 40] });
 
     var iconYo = L.divIcon({ className: '', html: '<div class="yo"></div>', iconSize: [18,18], iconAnchor: [9,9] });
     function iconOtro() { return L.divIcon({ className: '', html: '<div class="otro"></div>', iconSize: [16,16], iconAnchor: [8,8] }); }
 
     var meMarker = null;
-    var centrado = false;          // centrar el mapa solo en el primer GPS
-    var otrosMarkers = {};         // unitId -> marker
+    var otrosMarkers = {};
 
-    // React Native llama esto con MI posicion.
     window.setMe = function (lat, lng) {
-      if (!meMarker) {
-        meMarker = L.marker([lat, lng], { icon: iconYo, zIndexOffset: 1000 }).addTo(map);
-      } else {
-        meMarker.setLatLng([lat, lng]);
-      }
-      if (!centrado) { map.setView([lat, lng], 15); centrado = true; }
+      if (!meMarker) meMarker = L.marker([lat, lng], { icon: iconYo, zIndexOffset: 1000 }).addTo(map);
+      else meMarker.setLatLng([lat, lng]);
     };
 
-    // React Native llama esto con la lista de los demas choferes.
+    function avisarUnidad(u) {
+      if (window.ReactNativeWebView)
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'unit', unitId: u.unitId, lat: u.lat, lng: u.lng }));
+    }
+
     window.setOthers = function (lista) {
       var vistos = {};
       lista.forEach(function (u) {
@@ -88,101 +85,218 @@ const HTML = `
         if (otrosMarkers[u.unitId]) {
           otrosMarkers[u.unitId].setLatLng([u.lat, u.lng]);
         } else {
-          otrosMarkers[u.unitId] = L.marker([u.lat, u.lng], { icon: iconOtro() })
-            .addTo(map).bindTooltip(u.unitId, { direction: 'top' });
+          var m = L.marker([u.lat, u.lng], { icon: iconOtro() }).addTo(map).bindTooltip(u.unitId, { direction: 'top' });
+          m.on('click', function () { avisarUnidad(u); });
+          otrosMarkers[u.unitId] = m;
         }
       });
-      // Quitar markers de los que ya no estan.
       Object.keys(otrosMarkers).forEach(function (id) {
         if (!vistos[id]) { map.removeLayer(otrosMarkers[id]); delete otrosMarkers[id]; }
       });
     };
 
-    // Avisar a React Native que el mapa ya esta listo para recibir datos.
-    if (window.ReactNativeWebView) {
-      window.ReactNativeWebView.postMessage('ready');
-    }
+    if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage('ready');
   </script>
 </body>
 </html>
 `;
 
-export default function MapScreen() {
-  const { myPosition, otros, totalOnRoute, connected } = useFleet();
+export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
+  const { userPos, otros, totalOnRoute, connected } = useFleet();
   const webRef = useRef(null);
   const [ready, setReady] = useState(false);
+  const [selected, setSelected] = useState(null); // unidad tocada {unitId,lat,lng}
 
-  // Cuando llega MI posicion (o el mapa recien quedo listo), la inyectamos.
+  // Montaje perezoso: el WebView (y sus tiles) no cargan hasta entrar al mapa.
+  const [everActive, setEverActive] = useState(false);
   useEffect(() => {
-    if (ready && myPosition && webRef.current) {
-      webRef.current.injectJavaScript(
-        `window.setMe(${myPosition.lat}, ${myPosition.lng}); true;`
-      );
+    if (active) setEverActive(true);
+  }, [active]);
+
+  // Al salir de pantalla completa, cerramos la tarjeta de info.
+  useEffect(() => {
+    if (!fullscreen) setSelected(null);
+  }, [fullscreen]);
+
+  // Inyectar mi posicion (solo cuando el mapa esta visible).
+  useEffect(() => {
+    if (active && ready && userPos && webRef.current) {
+      webRef.current.injectJavaScript(`window.setMe(${userPos.lat}, ${userPos.lng}); true;`);
     }
-  }, [ready, myPosition]);
+  }, [active, ready, userPos]);
 
-  // Cuando cambian los otros choferes, los inyectamos.
+  // Inyectar las demas unidades (incluye fantasmas) cuando el mapa esta visible.
   useEffect(() => {
-    if (ready && webRef.current) {
+    if (active && ready && webRef.current) {
       const lista = otros
         .filter((u) => u.lat != null && u.lng != null)
         .map((u) => ({ unitId: u.unitId, lat: u.lat, lng: u.lng }));
-      webRef.current.injectJavaScript(
-        `window.setOthers(${JSON.stringify(lista)}); true;`
-      );
+      webRef.current.injectJavaScript(`window.setOthers(${JSON.stringify(lista)}); true;`);
     }
-  }, [ready, otros]);
+  }, [active, ready, otros]);
+
+  // ETA + paradero para la tarjeta de la unidad tocada (reusa la logica existente).
+  const etaSel =
+    selected && userPos
+      ? formatoMMSS(etaSegundos(distanciaMetros(userPos.lat, userPos.lng, selected.lat, selected.lng), VELOCIDAD_PRUEBA_KMH))
+      : '--:--';
+  const stopSel = selected ? paradaMasCercana(selected.lat, selected.lng) : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
-      <WebView
-        ref={webRef}
-        originWhitelist={['*']}
-        source={{ html: HTML }}
-        // La WebView nos avisa "ready" cuando el mapa termino de inicializar.
-        onMessage={(e) => {
-          if (e.nativeEvent.data === 'ready') setReady(true);
-        }}
-        style={{ flex: 1, backgroundColor: colors.bg }}
-      />
-
-      {/* Chip flotante: cuantos en ruta + estado de conexion */}
-      <View
-        style={{
-          position: 'absolute',
-          top: 48,
-          alignSelf: 'center',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          paddingVertical: 6,
-          paddingHorizontal: 12,
-          borderRadius: 100,
-          backgroundColor: colors.panel,
-          borderWidth: 1,
-          borderColor: colors.line,
-        }}
-      >
-        <View
-          style={{
-            width: 7,
-            height: 7,
-            borderRadius: 3.5,
-            backgroundColor: connected ? colors.green : colors.red,
+      {everActive ? (
+        <WebView
+          ref={webRef}
+          originWhitelist={['*']}
+          source={{ html: HTML }}
+          onMessage={(e) => {
+            const data = e.nativeEvent.data;
+            if (data === 'ready') {
+              setReady(true);
+              return;
+            }
+            try {
+              const msg = JSON.parse(data);
+              if (msg.type === 'unit') setSelected({ unitId: msg.unitId, lat: msg.lat, lng: msg.lng });
+            } catch {
+              // ignorar
+            }
           }}
+          style={{ flex: 1, backgroundColor: colors.bg }}
         />
-        <Text
-          style={{
-            fontFamily: mono,
-            fontSize: 11,
-            letterSpacing: 1,
-            color: colors.white,
-            textTransform: 'uppercase',
-          }}
-        >
+      ) : (
+        <View style={{ flex: 1, backgroundColor: colors.bg }} />
+      )}
+
+      {/* Chip de estado (arriba) */}
+      <View style={styles.chip}>
+        <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: connected ? colors.green : colors.red }} />
+        <Text style={{ fontFamily: mono, fontSize: 11, letterSpacing: 1, color: colors.white, textTransform: 'uppercase' }}>
           {connected ? 'En vivo' : 'Sin conexion'} · {totalOnRoute} en ruta
         </Text>
       </View>
+
+      {/* PREVIEW: capa que no deja al mapa comerse el gesto. Tocar = ampliar. */}
+      {!fullscreen && (
+        <Pressable style={StyleSheet.absoluteFill} onPress={() => onToggleFullscreen(true)}>
+          <View pointerEvents="none" style={styles.previewHintCenter}>
+            <Text style={{ fontFamily: mono, fontSize: 11, letterSpacing: 1, color: colors.white, textTransform: 'uppercase' }}>
+              Tocá para ampliar el mapa
+            </Text>
+          </View>
+          {/* Franja inferior: recordatorio de que se puede deslizar para cambiar de tarjeta */}
+          <View pointerEvents="none" style={styles.swipeStrip}>
+            <Text style={{ fontFamily: mono, fontSize: 11, letterSpacing: 2, color: colors.dim }}>
+              ‹  deslizá para cambiar de tarjeta  ›
+            </Text>
+          </View>
+        </Pressable>
+      )}
+
+      {/* PANTALLA COMPLETA: boton para cerrar */}
+      {fullscreen && (
+        <Pressable style={styles.closeBtn} onPress={() => onToggleFullscreen(false)}>
+          <Text style={{ fontFamily: black, color: colors.white, fontSize: 20 }}>✕</Text>
+        </Pressable>
+      )}
+
+      {/* Tarjeta de info de la unidad tocada */}
+      {selected && (
+        <View style={styles.infoCard}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <Text numberOfLines={1} style={{ fontFamily: black, fontSize: 16, color: colors.white, flex: 1 }}>
+              {selected.unitId}
+            </Text>
+            <Pressable onPress={() => setSelected(null)} hitSlop={10}>
+              <Text style={{ fontFamily: black, color: colors.dim, fontSize: 16 }}>✕</Text>
+            </Pressable>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: 4 }}>
+            <Text style={{ fontFamily: black, fontSize: 34, color: colors.bright, fontVariant: ['tabular-nums'] }}>
+              {etaSel}
+            </Text>
+            <Text style={{ fontFamily: mono, fontSize: 11, color: colors.dim, marginBottom: 6 }}>
+              ETA ({VELOCIDAD_PRUEBA_KMH} km/h)
+            </Text>
+          </View>
+          <Text style={{ fontFamily: mono, fontSize: 11, color: colors.mute, marginTop: 2 }}>
+            Paradero mas cercano: <Text style={{ color: colors.white }}>{stopSel || '--'}</Text>
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  chip: {
+    position: 'absolute',
+    top: 56,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: 100,
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.line,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  previewHintCenter: {
+    position: 'absolute',
+    top: '50%',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(10,26,46,0.85)',
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 100,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+  },
+  swipeStrip: {
+    position: 'absolute',
+    bottom: 16,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(10,26,46,0.8)',
+    borderRadius: 100,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+  },
+  closeBtn: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 5,
+  },
+  infoCard: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 24,
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+});

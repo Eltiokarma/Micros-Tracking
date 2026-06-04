@@ -1,56 +1,161 @@
 // ============================================================================
-//  RouteScreen: la pantalla central (la que mas mira el chofer).
+//  RouteScreen: pantalla central. La ESTRELLA es el anti-correteo grande.
 // ============================================================================
-//  Une los 4 componentes: ContextHeader (arriba), dos BigTime (brechas
-//  adelante/atras), el Semaphore (en medio) y el SosSlider (abajo).
-//  Los datos salen del FleetContext (useFleet): no hay nada "hardcodeado".
+//  - Toma la unidad MAS CERCANA (de las unidades en ruta, incluidos los
+//    fantasmas de prueba) y muestra EN GRANDE el ETA hacia ella, con el color
+//    del semaforo (verde = hay hueco, amarillo = acercandote, rojo = muy pegado).
+//  - El semaforo queda de apoyo, integrado debajo.
+//  - Abajo, chico y secundario, el resto de las unidades con su ETA.
+//  - SOS deslizable fijo al pie. Todo sale de useFleet.
+//  Reusa la logica de utils/eta.js (distancia, ETA y estado de proximidad).
 // ============================================================================
 
 import React from 'react';
-import { View } from 'react-native';
+import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { useFleet } from '../context/FleetContext';
-import { computeStatus, parseGap } from '../utils/status';
-import { getTramo } from '../services/routeProgress';
-import { TARGET_GAP_SEC } from '../config/coop';
+import {
+  distanciaMetros,
+  etaSegundos,
+  formatoMMSS,
+  estadoProximidadPorEta,
+} from '../utils/eta';
+import { VELOCIDAD_PRUEBA_KMH } from '../config/fantasmas';
 import colors from '../theme/colors';
+import { mono, black } from '../theme/fonts';
 import ContextHeader from '../components/ContextHeader';
 import BigTime from '../components/BigTime';
 import Semaphore from '../components/Semaphore';
 import SosSlider from '../components/SosSlider';
 
+const STATUS_COLOR = { red: colors.red, yellow: colors.yellow, green: colors.green };
+const STATUS_TEXTO = { red: 'Muy pegado', yellow: 'Acercándote', green: 'Hay hueco' };
+
 export default function RouteScreen({ onFireSos }) {
-  const { miGap, myPosition, sendSos } = useFleet();
+  const { otros, userPos, sendSos, parada, avgSpeed } = useFleet();
 
-  const front = miGap?.toAhead || '--:--';
-  const back = miGap?.toBehind || '--:--';
-  const avgSpeed = myPosition?.speed || 0;
+  // Unidades con posicion, ordenadas por distancia a mi (la mas cercana primero).
+  const conPos = otros.filter((u) => u.lat != null && u.lng != null);
+  const ordenadas = userPos
+    ? conPos
+        .map((u) => ({ ...u, dist: distanciaMetros(userPos.lat, userPos.lng, u.lat, u.lng) }))
+        .sort((a, b) => a.dist - b.dist)
+    : conPos.map((u) => ({ ...u, dist: null }));
 
-  const status = computeStatus(parseGap(miGap?.toAhead), parseGap(miGap?.toBehind), TARGET_GAP_SEC);
-  const statusColor = { red: colors.red, yellow: colors.yellow, green: colors.green }[status];
-
-  // Tramo real (parada actual -> siguiente) segun mi progreso en la ruta.
-  const { currentStop, nextStop } = getTramo(myPosition?.routeProgress ?? 0);
+  const nearest = ordenadas[0] || null;
+  const etaSec = nearest && nearest.dist != null ? etaSegundos(nearest.dist, VELOCIDAD_PRUEBA_KMH) : null;
+  const etaStr = formatoMMSS(etaSec);
+  const status = estadoProximidadPorEta(etaSec);
+  const statusColor = STATUS_COLOR[status];
+  const resto = ordenadas.slice(1);
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bg, paddingHorizontal: 14, paddingTop: 48, paddingBottom: 20 }}>
-      {/* Arriba: tramo + velocidad */}
-      <ContextHeader currentStop={currentStop} nextStop={nextStop} avgSpeed={avgSpeed} />
+    <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: 56 }}>
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12, gap: 14 }}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Parada mas cercana + velocidad */}
+        <ContextHeader parada={parada} avgSpeed={avgSpeed} />
 
-      {/* Centro: brechas + semaforo, repartidos en el espacio disponible */}
-      <View style={{ flex: 1, justifyContent: 'space-around', alignItems: 'center' }}>
-        <BigTime label="+1 adelante" value={front} color={statusColor} />
-        <Semaphore status={status} />
-        <BigTime label="-1 atras" value={back} color={statusColor} />
+        {/* ===== HERO: anti-correteo a la unidad mas cercana ===== */}
+        <View style={[styles.hero, { borderColor: statusColor }]}>
+          <Text style={styles.heroLabel}>Anti-correteo</Text>
+          <BigTime
+            label={nearest ? `hacia ${nearest.unitId}` : 'sin unidades'}
+            value={etaStr}
+            color={statusColor}
+          />
+          <View style={{ marginTop: 10 }}>
+            <Semaphore status={status} />
+          </View>
+          <Text style={[styles.estado, { color: statusColor }]}>{STATUS_TEXTO[status]}</Text>
+        </View>
+
+        {/* ===== Secundario: el resto de las unidades ===== */}
+        {resto.length > 0 && (
+          <View style={styles.sec}>
+            <Text style={styles.secLabel}>Otras unidades</Text>
+            {resto.map((u) => {
+              const e = u.dist != null ? formatoMMSS(etaSegundos(u.dist, VELOCIDAD_PRUEBA_KMH)) : '--:--';
+              return (
+                <View key={u.unitId} style={styles.secRow}>
+                  <Text numberOfLines={1} style={styles.secName}>
+                    {u.unitId}
+                  </Text>
+                  <Text style={styles.secEta}>{e}</Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </ScrollView>
+
+      {/* SOS deslizable, fijo abajo. */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24 }}>
+        <SosSlider
+          status={status}
+          onFire={() => {
+            sendSos();
+            if (onFireSos) onFireSos();
+          }}
+        />
       </View>
-
-      {/* Abajo: SOS deslizable. Al dispararse: envia al servidor Y muestra el flash. */}
-      <SosSlider
-        status={status}
-        onFire={() => {
-          sendSos(); // envia { type:'sos', lat, lng, timestamp } por WebSocket
-          if (onFireSos) onFireSos(); // flash rojo inmediato a pantalla completa
-        }}
-      />
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  hero: {
+    backgroundColor: colors.panel,
+    borderWidth: 2,
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  heroLabel: {
+    fontFamily: mono,
+    fontSize: 11,
+    letterSpacing: 2,
+    color: colors.dim,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  estado: {
+    fontFamily: black,
+    fontSize: 16,
+    letterSpacing: 1,
+    marginTop: 8,
+    textTransform: 'uppercase',
+  },
+  sec: {
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 10,
+  },
+  secLabel: {
+    fontFamily: mono,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    color: colors.dim,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  secRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  secName: { fontFamily: black, fontSize: 14, color: colors.white, flex: 1, minWidth: 0 },
+  secEta: { fontFamily: black, fontSize: 18, color: colors.bright, fontVariant: ['tabular-nums'], marginLeft: 12 },
+});

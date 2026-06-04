@@ -1,94 +1,112 @@
 // ============================================================================
-//  routeProgress.js  —  Convierte (lat, lng) en un numero 0..1
+//  routeProgress.js  —  Progreso 0..1 a lo largo de una polilinea de paradas
 // ============================================================================
 //
 //  QUE ES routeProgress:
-//  Es "que tan avanzado vas en la ruta R-14", de 0 a 1.
-//    0  = Terminal Sur (inicio)
-//    1  = Huancane (final)
-//    0.5 = vas por la mitad
+//  "Que tan avanzado vas en el recorrido", de 0 (primera parada) a 1 (ultima).
 //
-//  POR QUE IMPORTA:
-//  El servidor NO sabe ubicaciones reales de calles; solo compara este
-//  numero entre choferes para saber quien va adelante y quien atras, y asi
-//  calcular las brechas (gaps) de tiempo. Si este numero esta mal, el
-//  semaforo y los tiempos +1/-1 saldrian mal.
+//  COMO SE CALCULA (importante):
+//  Tratamos las paradas como UNA polilinea secuencial (punto 1 -> 2 -> ... -> 9).
+//  Para una posicion (lat,lng):
+//    1) la proyectamos sobre el segmento MAS CERCANO de la polilinea,
+//    2) tomamos la distancia ACUMULADA a lo largo de la ruta hasta esa proyeccion,
+//    3) dividimos por la longitud total -> progreso 0..1.
+//  Asi el progreso avanza de forma monotona a lo largo del recorrido, aunque la
+//  ida y la vuelta pasen por calles distintas (es un circuito ida y vuelta).
 //
-//  IMPORTANTE: esta formula es COPIA EXACTA del cliente web viejo
-//  (realtime.js). La mantenemos identica para que la app nueva y el
-//  servidor "hablen el mismo idioma" de progreso.
+//  OJO: este es un CIRCUITO DE PRUEBA. El punto 1 y el 9 son la misma esquina
+//  (Circunvalacion). Por posicion sola, esa esquina es ambigua (inicio o fin);
+//  la proyeccion la resuelve como inicio (progreso ~0).
 // ============================================================================
 
-// Los dos extremos de la ruta (coordenadas reales en Juliaca).
-const TERMINAL_SUR = { lat: -15.502, lng: -70.133 }; // progreso 0
-const HUANCANE = { lat: -15.457, lng: -70.103 };      // progreso 1
+// --- Paradas del circuito de prueba, EN ORDEN (ida y vuelta) ----------------
+export const PARADAS = [
+  { nombre: 'Circunvalación', lat: -15.491641494357753, lng: -70.12169544995002 }, // 1 inicio
+  { nombre: 'Benigno Ballón', lat: -15.492539599885784, lng: -70.12414911872533 }, // 2
+  { nombre: 'Raúl Porras', lat: -15.493089305946617, lng: -70.12568547310879 }, // 3
+  { nombre: 'Ramón Castilla', lat: -15.49385749269465, lng: -70.12774572487804 }, // 4
+  { nombre: 'Apurímac', lat: -15.493430121555079, lng: -70.1290088220023 }, // 5 retorno
+  { nombre: 'Gonzáles Prada', lat: -15.492626769604342, lng: -70.12701874234612 }, // 6
+  { nombre: 'Túpac Amaru', lat: -15.4918829011274, lng: -70.12503228754773 }, // 7
+  { nombre: 'Maestro', lat: -15.491271591977588, lng: -70.12344359202996 }, // 8
+  { nombre: 'Circunvalación', lat: -15.491641494357753, lng: -70.12169544995002 }, // 9 fin (= 1)
+];
 
+// --- Conversion lat/lng -> metros locales (plano) ---------------------------
+// El area es chica (~pocas cuadras), asi que una proyeccion equirectangular
+// alcanza: 1 grado de lat ~111320 m; 1 grado de lng ~111320*cos(lat).
+const LAT0 = PARADAS[0].lat;
+const LNG0 = PARADAS[0].lng;
+const M_POR_LAT = 111320;
+const M_POR_LNG = 111320 * Math.cos((LAT0 * Math.PI) / 180);
+
+function aXY(lat, lng) {
+  return { x: (lng - LNG0) * M_POR_LNG, y: (lat - LAT0) * M_POR_LAT };
+}
+
+// Precalculamos los puntos en metros y la distancia acumulada en cada vertice.
+const PTS = PARADAS.map((p) => aXY(p.lat, p.lng));
+const SEG_LEN = [];
+const CUM = [0]; // CUM[i] = distancia desde el inicio hasta el vertice i
+for (let i = 0; i < PTS.length - 1; i++) {
+  const dx = PTS[i + 1].x - PTS[i].x;
+  const dy = PTS[i + 1].y - PTS[i].y;
+  const len = Math.hypot(dx, dy);
+  SEG_LEN.push(len);
+  CUM.push(CUM[i] + len);
+}
+const TOTAL = CUM[CUM.length - 1] || 1; // longitud total de la polilinea
+
+// ============================================================================
+//  calcularRouteProgress(lat, lng) -> 0..1
+// ============================================================================
 export function calcularRouteProgress(lat, lng) {
-  const totalLat = HUANCANE.lat - TERMINAL_SUR.lat; // cuanto cambia la latitud de punta a punta
-  const totalLng = HUANCANE.lng - TERMINAL_SUR.lng; // idem longitud
+  if (PTS.length < 2) return 0;
+  const p = aXY(lat, lng);
 
-  const doneLat = lat - TERMINAL_SUR.lat; // cuanto avanzaste en latitud
-  const doneLng = lng - TERMINAL_SUR.lng; // cuanto avanzaste en longitud
+  let mejorDist = Infinity;
+  let mejorAcumulado = 0;
 
-  // Promediamos el avance en las dos dimensiones. Es una aproximacion:
-  // asume que la ruta es mas o menos una linea recta de sur a norte.
-  const progress = (doneLat / totalLat + doneLng / totalLng) / 2;
+  for (let i = 0; i < PTS.length - 1; i++) {
+    const a = PTS[i];
+    const b = PTS[i + 1];
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const seg2 = abx * abx + aby * aby || 1e-9;
 
-  // clamp: nunca menos de 0 ni mas de 1, aunque el GPS se salga de la ruta.
-  return Math.max(0, Math.min(1, progress));
+    // t = posicion de la proyeccion sobre el segmento [a,b], recortada a [0,1]
+    let t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / seg2;
+    t = Math.max(0, Math.min(1, t));
+
+    const projx = a.x + t * abx;
+    const projy = a.y + t * aby;
+    const dist = Math.hypot(p.x - projx, p.y - projy); // distancia perpendicular
+
+    if (dist < mejorDist) {
+      mejorDist = dist;
+      mejorAcumulado = CUM[i] + t * SEG_LEN[i]; // distancia acumulada hasta la proyeccion
+    }
+  }
+
+  return Math.max(0, Math.min(1, mejorAcumulado / TOTAL));
 }
 
 // ============================================================================
-//  PARADAS DEL RECORRIDO (Juliaca <-> Huancane, Puno)
+//  paradaMasCercana(lat, lng) -> nombre de la parada mas cercana
 // ============================================================================
-//  ESTRUCTURA EDITABLE. Solo los dos EXTREMOS son reales y conocidos:
-//    - Terminal Sur = progreso 0 (inicio)
-//    - Huancane     = progreso 1 (fin)
-//  Las paradas intermedias son MARCADORES de ejemplo: reemplaza `nombre` por
-//  el nombre real de cada parada y ajusta `progreso` (0..1) segun donde caiga
-//  en la ruta. Manten la lista ORDENADA de menor a mayor progreso.
-//
-//  Para estimar el `progreso` de una parada real: mira el routeProgress que
-//  reporta la app al pasar por ese punto, o calcula su posicion relativa
-//  entre Terminal Sur y Huancane.
-// ============================================================================
-export const PARADAS = [
-  { nombre: 'Terminal Sur', progreso: 0 },        // REAL - inicio
-  { nombre: 'Parada 1 (editar)', progreso: 0.25 }, // placeholder
-  { nombre: 'Parada 2 (editar)', progreso: 0.5 },  // placeholder
-  { nombre: 'Parada 3 (editar)', progreso: 0.75 }, // placeholder
-  { nombre: 'Huancane', progreso: 1 },            // REAL - fin
-];
-
-// ============================================================================
-//  getTramo(routeProgress) -> { currentStop, nextStop }
-// ============================================================================
-//  Dado el progreso (0..1), devuelve el nombre de la parada que acabas de
-//  pasar (o de la que sales) y la siguiente. Al llegar al final, nextStop = null.
-//  Asume que `paradas` esta ordenada por progreso ascendente.
-// ============================================================================
-export function getTramo(routeProgress, paradas = PARADAS) {
-  if (!paradas || paradas.length === 0) {
-    return { currentStop: null, nextStop: null };
+export function paradaMasCercana(lat, lng) {
+  if (PARADAS.length === 0) return null;
+  const p = aXY(lat, lng);
+  let mejorDist = Infinity;
+  let mejorNombre = PARADAS[0].nombre;
+  for (let i = 0; i < PTS.length; i++) {
+    const d = Math.hypot(p.x - PTS[i].x, p.y - PTS[i].y);
+    if (d < mejorDist) {
+      mejorDist = d;
+      mejorNombre = PARADAS[i].nombre;
+    }
   }
-
-  // clamp del progreso a [0, 1]
-  const p = Math.max(0, Math.min(1, Number(routeProgress) || 0));
-
-  // indice de la ultima parada cuyo progreso ya alcanzamos (progreso <= p)
-  let i = 0;
-  for (let j = 0; j < paradas.length; j++) {
-    if (paradas[j].progreso <= p) i = j;
-    else break;
-  }
-
-  const current = paradas[i];
-  const next = paradas[i + 1] || null;
-
-  return {
-    currentStop: current.nombre,
-    nextStop: next ? next.nombre : null,
-  };
+  return mejorNombre;
 }
 
 export default calcularRouteProgress;

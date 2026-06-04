@@ -18,9 +18,13 @@
 //    - lo expone todo via el hook useFleet()
 // ============================================================================
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import * as socket from './../services/socket';
 import * as location from './../services/location';
+import { leerEstado } from './../services/sharedStatus';
+import { guardarSesion, leerSesion, borrarSesion } from './../services/session';
+import { guardarMensajes, leerMensajesDeHoy } from './../services/chatStore';
+import { FANTASMAS, MODO_PRUEBA_FANTASMAS } from './../config/fantasmas';
 
 // 1) Creamos el contexto (la "pizarra" vacia).
 const FleetContext = createContext(null);
@@ -47,6 +51,17 @@ export function FleetProvider({ children }) {
   // --- Aviso si el chofer NO dio permiso de background ---
   const [backgroundOk, setBackgroundOk] = useState(true);
 
+  // --- Datos que vienen de la tarea de fondo via store compartido ---
+  const [parada, setParada] = useState(null);   // parada mas cercana
+  const [avgSpeed, setAvgSpeed] = useState(0);   // velocidad reportada por la tarea
+  const [userPos, setUserPos] = useState(null);  // mi posicion {lat,lng} (cruza contextos)
+
+  // --- Sesion recordada: false hasta que terminamos de leer la sesion guardada ---
+  const [sessionChecked, setSessionChecked] = useState(false);
+
+  // Para no persistir el chat antes de haber cargado los mensajes del dia.
+  const chatCargado = useRef(false);
+
   // ------------------------------------------------------------------
   //  Escuchamos al socket SOLO mientras hay sesion iniciada.
   //  Cuando unitId cambia (login), nos suscribimos; al salir, limpiamos.
@@ -59,21 +74,34 @@ export function FleetProvider({ children }) {
         setUnits(event.state.units);
         setGaps(event.state.gaps);
         setTotalOnRoute(event.state.totalOnRoute);
-      } else if (event.type === 'status') {
-        setConnected(event.connected);
       } else if (event.type === 'sos_alert') {
         // id unico para que la pantalla detecte "llego una alerta nueva".
         setSosAlert({ ...event, id: `${event.unitId}-${event.timestamp}` });
       } else if (event.type === 'chat_msg') {
-        setMessages((prev) => [
-          ...prev,
-          {
-            unitId: event.unitId,
-            driverName: event.driverName,
-            text: event.text,
-            timestamp: event.timestamp,
-          },
-        ]);
+        setMessages((prev) => {
+          // Evitar duplicar el eco local del propio mensaje: el servidor
+          // reenvia el chat_msg conservando unitId + timestamp + text.
+          const yaEsta = prev.some(
+            (m) => m.unitId === event.unitId && m.timestamp === event.timestamp && m.text === event.text
+          );
+          if (yaEsta) {
+            // marcamos el local como confirmado (deja de ser "optimista")
+            return prev.map((m) =>
+              m.local && m.unitId === event.unitId && m.timestamp === event.timestamp
+                ? { ...m, local: false }
+                : m
+            );
+          }
+          return [
+            ...prev,
+            {
+              unitId: event.unitId,
+              driverName: event.driverName,
+              text: event.text,
+              timestamp: event.timestamp,
+            },
+          ];
+        });
       }
     });
 
@@ -89,6 +117,35 @@ export function FleetProvider({ children }) {
   }, [unitId]);
 
   // ------------------------------------------------------------------
+  //  Conexion REAL desde la tarea de fondo (que vive en otro contexto JS).
+  //  La tarea escribe su ultimo envio en un archivo; aca lo leemos cada 3s.
+  //  "EN VIVO" = hubo un envio exitoso en los ultimos 10 segundos.
+  //  Asi el indicador refleja lo que de verdad esta enviando la tarea,
+  //  no el socket (distinto) de la UI.
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    if (!unitId) return undefined;
+    let activo = true;
+    const revisar = async () => {
+      const est = await leerEstado();
+      if (!activo || !est) return; // sin lectura valida, mantenemos lo anterior
+      const reciente = !!est.enviado && Date.now() - (est.ts || 0) < 10000;
+      setConnected(reciente);
+      if (est.parada) setParada(est.parada);
+      if (typeof est.speed === 'number') setAvgSpeed(est.speed);
+      if (est.lat != null && est.lng != null) {
+        setUserPos({ lat: est.lat, lng: est.lng, routeProgress: est.routeProgress, speed: est.speed });
+      }
+    };
+    revisar();
+    const id = setInterval(revisar, 3000);
+    return () => {
+      activo = false;
+      clearInterval(id);
+    };
+  }, [unitId]);
+
+  // ------------------------------------------------------------------
   //  login(): el chofer escribe su nombre y entra.
   //  El nombre ES el ID en el servidor (asi lo definiste).
   // ------------------------------------------------------------------
@@ -98,6 +155,9 @@ export function FleetProvider({ children }) {
 
     setUnitId(id);
     setDriverName(id);
+
+    // 0) Recordamos la sesion para entrar directo la proxima vez.
+    guardarSesion(id);
 
     // 1) Abrimos el WebSocket y nos identificamos.
     socket.connect(id, id);
@@ -111,6 +171,7 @@ export function FleetProvider({ children }) {
   //  logout(): cerramos todo de forma ordenada.
   // ------------------------------------------------------------------
   const logout = useCallback(async () => {
+    await borrarSesion(); // olvidar la sesion para que pida usuario de nuevo
     await location.detenerRastreo();
     socket.disconnect();
     setUnitId(null);
@@ -120,21 +181,77 @@ export function FleetProvider({ children }) {
     setTotalOnRoute(0);
     setMyPosition(null);
     setConnected(false);
-    setMessages([]);
+    // NO borramos los mensajes: el chat del dia se mantiene aunque cambie el
+    // usuario (son avisos de la jornada). Se limpian solos al cambiar de dia.
     setSosAlert(null);
+    setParada(null);
+    setAvgSpeed(0);
+    setUserPos(null);
   }, []);
+
+  // ------------------------------------------------------------------
+  //  Restaurar sesion al abrir la app: si hay un nombre guardado, entramos
+  //  directo (sin volver a escribir el usuario). No bloqueamos: marcamos
+  //  sessionChecked y disparamos el login en segundo plano.
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    let activo = true;
+    (async () => {
+      const nombre = await leerSesion();
+      if (!activo) return;
+      if (nombre) login(nombre); // arranca conexion + GPS; setUnitId muestra el main
+      setSessionChecked(true);
+    })();
+    return () => {
+      activo = false;
+    };
+  }, [login]);
+
+  // ------------------------------------------------------------------
+  //  Chat de la jornada: al abrir cargamos los mensajes de HOY (descartando
+  //  los de dias anteriores), y persistimos en cada cambio. Asi un aviso
+  //  sigue visible aunque se cierre/reabra la app o se cambie de usuario.
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    let activo = true;
+    (async () => {
+      const guardados = await leerMensajesDeHoy();
+      if (!activo) return;
+      if (guardados.length) setMessages(guardados);
+      chatCargado.current = true; // recien ahora permitimos persistir
+    })();
+    return () => {
+      activo = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (chatCargado.current) guardarMensajes(messages);
+  }, [messages]);
 
   // ------------------------------------------------------------------
   //  Acciones de SOS y chat (usan mi posicion local actual).
   // ------------------------------------------------------------------
   const sendSos = useCallback(() => {
     const p = location.getLastPosition();
-    socket.sendSos({ lat: p?.lat ?? null, lng: p?.lng ?? null });
+    const ok = socket.sendSos({ lat: p?.lat ?? null, lng: p?.lng ?? null });
+    // [DIAG] confirma si el socket de la UI (distinto al de la tarea) envia.
+    console.log('[diag] sendSos via UI socket | ws.conectado=' + socket.isConnected() + ' | enviado=' + ok);
   }, []);
 
   const sendChat = useCallback((text) => {
-    socket.sendChat(text);
-  }, []);
+    const limpio = (text || '').trim();
+    if (!limpio) return;
+    const ts = Date.now();
+    const ok = socket.sendChat(limpio, ts);
+    // Eco local OPTIMISTA: mostramos el mensaje propio al instante, sin esperar
+    // el rebote del servidor (que con una sola unidad podria no llegar nunca).
+    setMessages((prev) => [
+      ...prev,
+      { unitId, driverName, text: limpio, timestamp: ts, local: true },
+    ]);
+    console.log('[diag] sendChat via UI socket | ws.conectado=' + socket.isConnected() + ' | enviado=' + ok);
+  }, [unitId, driverName]);
 
   // ------------------------------------------------------------------
   //  Atajos utiles para las pantallas:
@@ -142,7 +259,9 @@ export function FleetProvider({ children }) {
   //  otros = las demas combis (para los puntos azules del mapa).
   // ------------------------------------------------------------------
   const miGap = unitId ? gaps[unitId] || null : null;
-  const otros = units.filter((u) => u.unitId !== unitId);
+  const otrosReales = units.filter((u) => u.unitId !== unitId);
+  // En modo prueba agregamos los conductores fantasma (estaticos) a la flota.
+  const otros = MODO_PRUEBA_FANTASMAS ? [...otrosReales, ...FANTASMAS] : otrosReales;
 
   // El "value" es lo que queda escrito en la pizarra para todos.
   const value = {
@@ -156,6 +275,10 @@ export function FleetProvider({ children }) {
     connected,
     myPosition,
     backgroundOk,
+    parada,
+    avgSpeed,
+    userPos,
+    sessionChecked,
     messages,
     sosAlert,
     login,

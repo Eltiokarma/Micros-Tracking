@@ -18,6 +18,7 @@ import { useFleet } from '../context/FleetContext';
 import { PARADAS, paradaMasCercana, distanciaConFallback } from '../services/routeProgress';
 import { etaSegundos, formatoMMSS, velocidadParaEta } from '../utils/eta';
 import { VELOCIDAD_PRUEBA_KMH } from '../config/fantasmas';
+import RutaRecorder from '../components/RutaRecorder';
 import colors from '../theme/colors';
 import { mono, black } from '../theme/fonts';
 
@@ -106,6 +107,7 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
   const webRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [selected, setSelected] = useState(null); // unidad tocada {unitId,lat,lng}
+  const [grabadorVisible, setGrabadorVisible] = useState(false); // grabador de rutas
 
   // Montaje perezoso: el WebView (y sus tiles) no cargan hasta entrar al mapa.
   const [everActive, setEverActive] = useState(false);
@@ -226,6 +228,15 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
           </Text>
         </View>
       )}
+
+      {/* Boton discreto: grabador de rutas (herramienta de trabajo). Va por
+          encima de la capa de preview para que se pueda tocar sin ampliar. */}
+      <Pressable style={styles.recBtn} onPress={() => setGrabadorVisible(true)}>
+        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.red }} />
+        <Text style={{ fontFamily: mono, fontSize: 10, letterSpacing: 1, color: colors.white }}>REC</Text>
+      </Pressable>
+
+      <RutaRecorder visible={grabadorVisible} onClose={() => setGrabadorVisible(false)} />
     </View>
   );
 }
@@ -282,6 +293,21 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     alignItems: 'center',
     justifyContent: 'center',
+    elevation: 5,
+  },
+  recBtn: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 100,
+    backgroundColor: colors.panel,
+    borderWidth: 1,
+    borderColor: colors.line,
     elevation: 5,
   },
   infoCard: {

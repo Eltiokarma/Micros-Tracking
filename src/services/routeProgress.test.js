@@ -3,8 +3,14 @@ import {
   calcularRouteProgress,
   paradaMasCercana,
   PARADAS,
+  PARADAS_IDA,
+  PARADAS_VUELTA,
   distanciaEnRutaMetros,
   distanciaConFallback,
+  detectarSentido,
+  progresoEnRuta,
+  puntoEnDistancia,
+  largoRuta,
 } from './routeProgress';
 
 describe('calcularRouteProgress', () => {
@@ -86,5 +92,47 @@ describe('distanciaConFallback (MEJORA C)', () => {
     const d = distanciaConFallback(0, 0, b.lat, b.lng);
     expect(d).toBeGreaterThan(0);
     expect(Number.isFinite(d)).toBe(true);
+  });
+});
+
+describe('rutas IDA / VUELTA (Tarea 1)', () => {
+  it('detectarSentido: Raul Porras (solo ida) -> ida', () => {
+    const p = PARADAS_IDA[2];
+    expect(detectarSentido(p.lat, p.lng)).toBe('ida');
+  });
+
+  it('detectarSentido: Tupac Amaru (solo vuelta) -> vuelta', () => {
+    const p = PARADAS_VUELTA[2];
+    expect(detectarSentido(p.lat, p.lng)).toBe('vuelta');
+  });
+
+  it('progresoEnRuta: 0 al inicio y ~1 al final de IDA', () => {
+    const ini = PARADAS_IDA[0];
+    const fin = PARADAS_IDA[PARADAS_IDA.length - 1];
+    expect(progresoEnRuta(ini.lat, ini.lng, 'ida')).toBeCloseTo(0, 2);
+    expect(progresoEnRuta(fin.lat, fin.lng, 'ida')).toBeCloseTo(1, 2);
+  });
+
+  it('paradaMasCercana respeta el sentido', () => {
+    const p = PARADAS_VUELTA[1]; // Gonzales Prada (solo vuelta)
+    expect(paradaMasCercana(p.lat, p.lng, 'vuelta')).toBe('Gonzáles Prada');
+  });
+
+  it('distanciaEnRutaMetros por sentido: positiva entre dos paradas de ida', () => {
+    const a = PARADAS_IDA[1];
+    const b = PARADAS_IDA[3];
+    const d = distanciaEnRutaMetros(a.lat, a.lng, b.lat, b.lng, 'ida');
+    expect(d).toBeGreaterThan(0);
+    expect(Number.isFinite(d)).toBe(true);
+  });
+
+  it('puntoEnDistancia: 0 -> primera parada de ida; total -> ultima', () => {
+    const p0 = puntoEnDistancia('ida', 0);
+    expect(p0.lat).toBeCloseTo(PARADAS_IDA[0].lat, 4);
+    expect(p0.lng).toBeCloseTo(PARADAS_IDA[0].lng, 4);
+    const pf = puntoEnDistancia('ida', largoRuta('ida'));
+    const fin = PARADAS_IDA[PARADAS_IDA.length - 1];
+    expect(pf.lat).toBeCloseTo(fin.lat, 4);
+    expect(pf.lng).toBeCloseTo(fin.lng, 4);
   });
 });

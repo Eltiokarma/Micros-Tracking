@@ -1,28 +1,33 @@
 // ============================================================================
-//  MapScreen: mapa Leaflet con DOS modos para resolver el conflicto de gestos.
+//  MapScreen: mapa Leaflet con rutas IDA/VUELTA, burbujas de ETA y 2 modos.
 // ============================================================================
-//  - PREVIEW (chico): el mapa se VE pero no captura gestos. Una capa encima
-//    deja que el carrusel reciba el swipe y, al TOCAR, abre el mapa grande.
-//  - PANTALLA COMPLETA: el mapa es 100% interactivo (paneo + zoom nativos de
-//    Leaflet). Un boton "X" cierra y vuelve al preview. (En App.js se desactiva
-//    el swipe del carrusel mientras esta en pantalla completa.)
-//  - Al tocar una unidad (real o fantasma) en pantalla completa, mostramos una
-//    tarjeta con nombre, ETA desde mi posicion y el paradero mas cercano.
-//  - DATOS: el WebView solo se monta/refresca cuando estas en la pestaña.
+//  - Dibuja la ruta de IDA (linea llena) y la de VUELTA (punteada) + paraderos.
+//  - Cada unidad muestra una BURBUJA flotante con su ETA (sin tocarla).
+//  - Preview (no captura gestos; tocar = ampliar) y pantalla completa (interactivo).
+//  - Tocar una unidad abre tarjeta con ETA + paradero (por su sentido).
+//  - El WebView solo carga/refresca cuando estas en la pestaña (prop active).
 // ============================================================================
 
 import React, { useRef, useState, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useFleet } from '../context/FleetContext';
-import { PARADAS, paradaMasCercana, distanciaConFallback } from '../services/routeProgress';
+import {
+  PARADAS,
+  PARADAS_IDA,
+  PARADAS_VUELTA,
+  paradaMasCercana,
+  distanciaConFallback,
+  detectarSentido,
+} from '../services/routeProgress';
 import { etaSegundos, formatoMMSS, velocidadParaEta } from '../utils/eta';
 import { VELOCIDAD_PRUEBA_KMH } from '../config/fantasmas';
 import RutaRecorder from '../components/RutaRecorder';
 import colors from '../theme/colors';
 import { mono, black } from '../theme/fonts';
 
-const RUTA_JSON = JSON.stringify(PARADAS.map((p) => [p.lat, p.lng]));
+const RUTA_IDA_JSON = JSON.stringify(PARADAS_IDA.map((p) => [p.lat, p.lng]));
+const RUTA_VUELTA_JSON = JSON.stringify(PARADAS_VUELTA.map((p) => [p.lat, p.lng]));
 const PARADEROS_JSON = JSON.stringify(
   PARADAS.slice(0, -1).map((p) => ({ nombre: p.nombre, lat: p.lat, lng: p.lng }))
 );
@@ -40,6 +45,13 @@ const HTML = `
       border: 3px solid ${colors.bg}; box-shadow: 0 0 0 2px ${colors.white}, 0 0 12px ${colors.white}; }
     .otro { width: 16px; height: 16px; border-radius: 50%; background: ${colors.bright};
       border: 2px solid #fff; box-shadow: 0 0 8px ${colors.bright}; }
+    .leaflet-tooltip.bubble {
+      background: rgba(22,48,74,0.92); color: ${colors.white};
+      border: 1px solid ${colors.line}; border-radius: 8px;
+      font-size: 10px; line-height: 1.2; padding: 2px 6px;
+      white-space: nowrap; box-shadow: none; pointer-events: none;
+    }
+    .leaflet-tooltip.bubble:before { display: none; } /* sin flecha, para no estorbar */
     .leaflet-tooltip { background: ${colors.panel}; color: ${colors.white}; border: 1px solid ${colors.line}; }
   </style>
 </head>
@@ -52,18 +64,20 @@ const HTML = `
       subdomains: 'abcd', maxZoom: 19
     }).addTo(map);
 
-    var ruta = ${RUTA_JSON};
-    var linea = L.polyline(ruta, { color: '${colors.bright}', weight: 4, opacity: 0.85 }).addTo(map);
+    // Rutas: IDA llena, VUELTA punteada.
+    var lIda = L.polyline(${RUTA_IDA_JSON}, { color: '${colors.bright}', weight: 4, opacity: 0.9 }).addTo(map);
+    var lVuelta = L.polyline(${RUTA_VUELTA_JSON}, { color: '${colors.brand}', weight: 4, opacity: 0.7, dashArray: '6,7' }).addTo(map);
     var paraderos = ${PARADEROS_JSON};
     paraderos.forEach(function (p) {
       L.circleMarker([p.lat, p.lng], {
         radius: 5, color: '#fff', weight: 2, fillColor: '${colors.brand}', fillOpacity: 1
-      }).addTo(map).bindTooltip(p.nombre, { direction: 'top' });
+      }).addTo(map).bindTooltip(p.nombre, { direction: 'bottom' });
     });
-    map.fitBounds(linea.getBounds(), { padding: [40, 40] });
+    map.fitBounds(lIda.getBounds().extend(lVuelta.getBounds()), { padding: [40, 40] });
 
     var iconYo = L.divIcon({ className: '', html: '<div class="yo"></div>', iconSize: [18,18], iconAnchor: [9,9] });
     function iconOtro() { return L.divIcon({ className: '', html: '<div class="otro"></div>', iconSize: [16,16], iconAnchor: [8,8] }); }
+    function burbuja(nombre, info) { return '<b>' + nombre + '</b>' + (info ? '<br>' + info : ''); }
 
     var meMarker = null;
     var otrosMarkers = {};
@@ -85,9 +99,11 @@ const HTML = `
         vistos[u.unitId] = true;
         if (otrosMarkers[u.unitId]) {
           otrosMarkers[u.unitId].setLatLng([u.lat, u.lng]);
+          otrosMarkers[u.unitId].setTooltipContent(burbuja(u.unitId, u.info));
         } else {
-          var m = L.marker([u.lat, u.lng], { icon: iconOtro() }).addTo(map).bindTooltip(u.unitId, { direction: 'top' });
-          m.on('click', function () { avisarUnidad(u); });
+          var m = L.marker([u.lat, u.lng], { icon: iconOtro() }).addTo(map);
+          m.bindTooltip(burbuja(u.unitId, u.info), { permanent: true, direction: 'top', offset: [0, -10], className: 'bubble' });
+          (function (uu) { m.on('click', function () { avisarUnidad(uu); }); })(u);
           otrosMarkers[u.unitId] = m;
         }
       });
@@ -106,16 +122,14 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
   const { userPos, otros, totalOnRoute, connected } = useFleet();
   const webRef = useRef(null);
   const [ready, setReady] = useState(false);
-  const [selected, setSelected] = useState(null); // unidad tocada {unitId,lat,lng}
-  const [grabadorVisible, setGrabadorVisible] = useState(false); // grabador de rutas
+  const [selected, setSelected] = useState(null);
+  const [grabadorVisible, setGrabadorVisible] = useState(false);
 
-  // Montaje perezoso: el WebView (y sus tiles) no cargan hasta entrar al mapa.
   const [everActive, setEverActive] = useState(false);
   useEffect(() => {
     if (active) setEverActive(true);
   }, [active]);
 
-  // Al salir de pantalla completa, cerramos la tarjeta de info.
   useEffect(() => {
     if (!fullscreen) setSelected(null);
   }, [fullscreen]);
@@ -127,24 +141,32 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
     }
   }, [active, ready, userPos]);
 
-  // Inyectar las demas unidades (incluye fantasmas) cuando el mapa esta visible.
+  // Inyectar las demas unidades CON su burbuja de ETA (depende de userPos).
   useEffect(() => {
-    if (active && ready && webRef.current) {
-      const lista = otros
-        .filter((u) => u.lat != null && u.lng != null)
-        .map((u) => ({ unitId: u.unitId, lat: u.lat, lng: u.lng }));
-      webRef.current.injectJavaScript(`window.setOthers(${JSON.stringify(lista)}); true;`);
-    }
-  }, [active, ready, otros]);
+    if (!(active && ready && webRef.current)) return;
+    const vel = velocidadParaEta(userPos?.speed, VELOCIDAD_PRUEBA_KMH);
+    const lista = otros
+      .filter((u) => u.lat != null && u.lng != null)
+      .map((u) => {
+        let info = '';
+        if (userPos && userPos.lat != null) {
+          const us = u.sentido || detectarSentido(u.lat, u.lng);
+          const d = distanciaConFallback(userPos.lat, userPos.lng, u.lat, u.lng, us);
+          info = formatoMMSS(etaSegundos(d, vel));
+        }
+        return { unitId: u.unitId, lat: u.lat, lng: u.lng, info };
+      });
+    webRef.current.injectJavaScript(`window.setOthers(${JSON.stringify(lista)}); true;`);
+  }, [active, ready, otros, userPos]);
 
-  // ETA + paradero para la tarjeta de la unidad tocada (reusa la logica existente).
-  // Velocidad real (con piso) y distancia a lo largo de la ruta (con fallback).
+  // Tarjeta de la unidad tocada: ETA + paradero por SU sentido.
+  const selSentido = selected ? detectarSentido(selected.lat, selected.lng) : null;
   const velSel = velocidadParaEta(userPos?.speed, VELOCIDAD_PRUEBA_KMH);
   const etaSel =
     selected && userPos
-      ? formatoMMSS(etaSegundos(distanciaConFallback(userPos.lat, userPos.lng, selected.lat, selected.lng), velSel))
+      ? formatoMMSS(etaSegundos(distanciaConFallback(userPos.lat, userPos.lng, selected.lat, selected.lng, selSentido), velSel))
       : '--:--';
-  const stopSel = selected ? paradaMasCercana(selected.lat, selected.lng) : null;
+  const stopSel = selected ? paradaMasCercana(selected.lat, selected.lng, selSentido) : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -172,7 +194,7 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
         <View style={{ flex: 1, backgroundColor: colors.bg }} />
       )}
 
-      {/* Chip de estado (arriba) */}
+      {/* Chip de estado */}
       <View style={styles.chip}>
         <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: connected ? colors.green : colors.red }} />
         <Text style={{ fontFamily: mono, fontSize: 11, letterSpacing: 1, color: colors.white, textTransform: 'uppercase' }}>
@@ -180,7 +202,7 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
         </Text>
       </View>
 
-      {/* PREVIEW: capa que no deja al mapa comerse el gesto. Tocar = ampliar. */}
+      {/* PREVIEW: capa que deja cambiar de tarjeta; tocar = ampliar */}
       {!fullscreen && (
         <Pressable style={StyleSheet.absoluteFill} onPress={() => onToggleFullscreen(true)}>
           <View pointerEvents="none" style={styles.previewHintCenter}>
@@ -188,7 +210,6 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
               Tocá para ampliar el mapa
             </Text>
           </View>
-          {/* Franja inferior: recordatorio de que se puede deslizar para cambiar de tarjeta */}
           <View pointerEvents="none" style={styles.swipeStrip}>
             <Text style={{ fontFamily: mono, fontSize: 11, letterSpacing: 2, color: colors.dim }}>
               ‹  deslizá para cambiar de tarjeta  ›
@@ -197,14 +218,20 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
         </Pressable>
       )}
 
-      {/* PANTALLA COMPLETA: boton para cerrar */}
+      {/* PANTALLA COMPLETA: cerrar */}
       {fullscreen && (
         <Pressable style={styles.closeBtn} onPress={() => onToggleFullscreen(false)}>
           <Text style={{ fontFamily: black, color: colors.white, fontSize: 20 }}>✕</Text>
         </Pressable>
       )}
 
-      {/* Tarjeta de info de la unidad tocada */}
+      {/* Boton discreto: grabador de rutas */}
+      <Pressable style={styles.recBtn} onPress={() => setGrabadorVisible(true)}>
+        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.red }} />
+        <Text style={{ fontFamily: mono, fontSize: 10, letterSpacing: 1, color: colors.white }}>REC</Text>
+      </Pressable>
+
+      {/* Tarjeta de la unidad tocada */}
       {selected && (
         <View style={styles.infoCard}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -219,22 +246,13 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
             <Text style={{ fontFamily: black, fontSize: 34, color: colors.bright, fontVariant: ['tabular-nums'] }}>
               {etaSel}
             </Text>
-            <Text style={{ fontFamily: mono, fontSize: 11, color: colors.dim, marginBottom: 6 }}>
-              ETA ({VELOCIDAD_PRUEBA_KMH} km/h)
-            </Text>
+            <Text style={{ fontFamily: mono, fontSize: 11, color: colors.dim, marginBottom: 6 }}>ETA</Text>
           </View>
           <Text style={{ fontFamily: mono, fontSize: 11, color: colors.mute, marginTop: 2 }}>
             Paradero mas cercano: <Text style={{ color: colors.white }}>{stopSel || '--'}</Text>
           </Text>
         </View>
       )}
-
-      {/* Boton discreto: grabador de rutas (herramienta de trabajo). Va por
-          encima de la capa de preview para que se pueda tocar sin ampliar. */}
-      <Pressable style={styles.recBtn} onPress={() => setGrabadorVisible(true)}>
-        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.red }} />
-        <Text style={{ fontFamily: mono, fontSize: 10, letterSpacing: 1, color: colors.white }}>REC</Text>
-      </Pressable>
 
       <RutaRecorder visible={grabadorVisible} onClose={() => setGrabadorVisible(false)} />
     </View>

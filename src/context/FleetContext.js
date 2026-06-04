@@ -24,7 +24,7 @@ import * as location from './../services/location';
 import { leerEstado } from './../services/sharedStatus';
 import { guardarSesion, leerSesion, borrarSesion } from './../services/session';
 import { guardarMensajes, leerMensajesDeHoy } from './../services/chatStore';
-import { FANTASMAS, MODO_PRUEBA_FANTASMAS } from './../config/fantasmas';
+import { fantasmasEnVivo, MODO_PRUEBA_FANTASMAS } from './../config/fantasmas';
 
 // 1) Creamos el contexto (la "pizarra" vacia).
 const FleetContext = createContext(null);
@@ -61,6 +61,10 @@ export function FleetProvider({ children }) {
 
   // Para no persistir el chat antes de haber cargado los mensajes del dia.
   const chatCargado = useRef(false);
+
+  // "tick" para refrescar la posicion de los fantasmas moviles (no se usa su
+  // valor; solo fuerza re-render cada 2 s para recalcular sus coordenadas).
+  const [, setTick] = useState(0);
 
   // ------------------------------------------------------------------
   //  Escuchamos al socket SOLO mientras hay sesion iniciada.
@@ -229,6 +233,13 @@ export function FleetProvider({ children }) {
     if (chatCargado.current) guardarMensajes(messages);
   }, [messages]);
 
+  // Mueve los fantasmas: re-render cada 2 s para recalcular sus posiciones.
+  useEffect(() => {
+    if (!MODO_PRUEBA_FANTASMAS) return undefined;
+    const id = setInterval(() => setTick((t) => t + 1), 2000);
+    return () => clearInterval(id);
+  }, []);
+
   // ------------------------------------------------------------------
   //  Acciones de SOS y chat (usan mi posicion local actual).
   // ------------------------------------------------------------------
@@ -260,8 +271,9 @@ export function FleetProvider({ children }) {
   // ------------------------------------------------------------------
   const miGap = unitId ? gaps[unitId] || null : null;
   const otrosReales = units.filter((u) => u.unitId !== unitId);
-  // En modo prueba agregamos los conductores fantasma (estaticos) a la flota.
-  const otros = MODO_PRUEBA_FANTASMAS ? [...otrosReales, ...FANTASMAS] : otrosReales;
+  // En modo prueba agregamos los conductores fantasma MOVILES (posicion segun
+  // el tiempo). Se recalculan en cada render (el tick los refresca cada 2 s).
+  const otros = MODO_PRUEBA_FANTASMAS ? [...otrosReales, ...fantasmasEnVivo()] : otrosReales;
 
   // El "value" es lo que queda escrito en la pizarra para todos.
   const value = {

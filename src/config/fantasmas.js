@@ -1,28 +1,63 @@
 // ============================================================================
-//  fantasmas.js  —  Conductores FANTASMA (solo para PRUEBAS)
+//  fantasmas.js  —  Conductores FANTASMA MOVILES (solo para PRUEBAS)
 // ============================================================================
-//  Unidades estaticas en coordenadas fijas (4 paraderos de la ruta) que NO se
-//  mueven. Sirven para probar el calculo de tiempos caminando con un solo
-//  celular: como ellos no se mueven, el tiempo hacia ellos cambia solo cuando
-//  vos te moves.
+//  3 unidades que recorren la ruta en bucle ida -> vuelta -> ida a velocidad
+//  constante. Su posicion se calcula segun el tiempo transcurrido (no tienen
+//  GPS real). Para el resto del sistema se comportan como unidades normales
+//  (aparecen en el mapa, en los relojes adelante/atras, etc.).
 //
-//  >>> PARA QUITARLOS: poné MODO_PRUEBA_FANTASMAS en false (o borra este archivo
-//      y sus imports). No afectan el rastreo real. <<<
+//  >>> PARA QUITARLOS: poné MODO_PRUEBA_FANTASMAS en false. <<<
 // ============================================================================
+
+import { puntoEnDistancia, largoRuta } from '../services/routeProgress';
 
 export const MODO_PRUEBA_FANTASMAS = true;
 
-// Velocidad asumida para estimar el tiempo hacia cada fantasma.
-// Como la prueba se hace CAMINANDO, usamos una velocidad de caminata
-// promedio: 5 km/h. En la app real esto seria la velocidad del vehiculo
-// o una velocidad medida en tiempo real.
+// Velocidad de los fantasmas (km/h) y cuantos son. Faciles de cambiar.
+export const VELOCIDAD_FANTASMA_KMH = 10;
+export const CANTIDAD_FANTASMAS = 3;
+
+// Fallback de velocidad para el ETA del usuario cuando aun no hay GPS real.
 export const VELOCIDAD_PRUEBA_KMH = 5;
 
-export const FANTASMAS = [
-  { unitId: 'Benigno Ballón', driverName: 'Benigno Ballón (fantasma)', lat: -15.492539599885784, lng: -70.12414911872533, fantasma: true },
-  { unitId: 'Apurímac', driverName: 'Apurímac (fantasma)', lat: -15.493430121555079, lng: -70.1290088220023, fantasma: true },
-  { unitId: 'Túpac Amaru', driverName: 'Túpac Amaru (fantasma)', lat: -15.4918829011274, lng: -70.12503228754773, fantasma: true },
-  { unitId: 'Ramón Castilla', driverName: 'Ramón Castilla (fantasma)', lat: -15.49385749269465, lng: -70.12774572487804, fantasma: true },
-];
+// Reparto inicial a lo largo del bucle: uno arrancando, uno a media ruta, uno
+// casi al final (fracciones del largo total del bucle ida+vuelta).
+const OFFSETS = [0, 0.45, 0.85];
 
-export default FANTASMAS;
+// Devuelve los fantasmas con su posicion ACTUAL segun el tiempo.
+export function fantasmasEnVivo(now = Date.now()) {
+  if (!MODO_PRUEBA_FANTASMAS) return [];
+  const idaLen = largoRuta('ida');
+  const vueltaLen = largoRuta('vuelta');
+  const loop = idaLen + vueltaLen || 1;
+  const vMps = (VELOCIDAD_FANTASMA_KMH * 1000) / 3600;
+  const recorrido = (now / 1000) * vMps; // metros recorridos desde epoch
+
+  const out = [];
+  for (let i = 0; i < CANTIDAD_FANTASMAS; i++) {
+    const off = (OFFSETS[i] != null ? OFFSETS[i] : i / CANTIDAD_FANTASMAS) * loop;
+    let d = (recorrido + off) % loop;
+    if (d < 0) d += loop;
+
+    let pos;
+    let sentido;
+    if (d < idaLen) {
+      pos = puntoEnDistancia('ida', d);
+      sentido = 'ida';
+    } else {
+      pos = puntoEnDistancia('vuelta', d - idaLen);
+      sentido = 'vuelta';
+    }
+    out.push({
+      unitId: `Fantasma ${i + 1}`,
+      driverName: `Fantasma ${i + 1}`,
+      lat: pos.lat,
+      lng: pos.lng,
+      sentido,
+      fantasma: true,
+    });
+  }
+  return out;
+}
+
+export default { MODO_PRUEBA_FANTASMAS, fantasmasEnVivo, VELOCIDAD_FANTASMA_KMH, CANTIDAD_FANTASMAS };

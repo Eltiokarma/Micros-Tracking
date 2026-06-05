@@ -26,6 +26,7 @@ import {
   distanciaConFallback,
 } from '../services/routeProgress';
 import { VELOCIDAD_PRUEBA_KMH } from '../config/fantasmas';
+import { ESTADOS } from '../services/serviceState';
 import colors from '../theme/colors';
 import ContextHeader from '../components/ContextHeader';
 import BigTime from '../components/BigTime';
@@ -67,7 +68,8 @@ export default function RouteScreen({ onFireSos }) {
   let atras = null;
   if (sentido && miProg != null) {
     const mismos = otros
-      .filter((u) => u.lat != null && u.lng != null)
+      // Las fuera de servicio (fantasma) NO cuentan como adelante/atras.
+      .filter((u) => u.lat != null && u.lng != null && u.estado !== ESTADOS.FUERA_DE_SERVICIO)
       .map((u) => ({
         ...u,
         us: u.sentido || detectarSentido(u.lat, u.lng),

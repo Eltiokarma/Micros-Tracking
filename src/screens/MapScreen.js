@@ -22,9 +22,25 @@ import {
 } from '../services/routeProgress';
 import { etaSegundos, formatoMMSS, velocidadParaEta } from '../utils/eta';
 import { VELOCIDAD_PRUEBA_KMH } from '../config/fantasmas';
+import { ESTADOS, OCULTAR_FUERA_DE_SERVICIO } from '../services/serviceState';
 import RutaRecorder from '../components/RutaRecorder';
 import colors from '../theme/colors';
 import { mono, black } from '../theme/fonts';
+
+// Color del icono/burbuja segun el estado de servicio de la unidad.
+const COLOR_ESTADO = {
+  [ESTADOS.EN_SERVICIO]: colors.green,
+  [ESTADOS.DETENIDA_EN_RUTA]: colors.bright,
+  [ESTADOS.ESPERA_AMARILLO]: colors.yellow,
+  [ESTADOS.ESPERA_ROJO]: colors.red,
+  [ESTADOS.FUERA_DE_SERVICIO]: colors.dim,
+};
+const ETIQUETA_ESTADO = {
+  [ESTADOS.DETENIDA_EN_RUTA]: 'detenida',
+  [ESTADOS.ESPERA_AMARILLO]: 'en espera',
+  [ESTADOS.ESPERA_ROJO]: 'en espera!',
+  [ESTADOS.FUERA_DE_SERVICIO]: 'fuera de servicio',
+};
 
 const RUTA_IDA_JSON = JSON.stringify(PARADAS_IDA.map((p) => [p.lat, p.lng]));
 const RUTA_VUELTA_JSON = JSON.stringify(PARADAS_VUELTA.map((p) => [p.lat, p.lng]));
@@ -76,8 +92,14 @@ const HTML = `
     map.fitBounds(lIda.getBounds().extend(lVuelta.getBounds()), { padding: [40, 40] });
 
     var iconYo = L.divIcon({ className: '', html: '<div class="yo"></div>', iconSize: [18,18], iconAnchor: [9,9] });
-    function iconOtro() { return L.divIcon({ className: '', html: '<div class="otro"></div>', iconSize: [16,16], iconAnchor: [8,8] }); }
-    function burbuja(nombre, info) { return '<b>' + nombre + '</b>' + (info ? '<br>' + info : ''); }
+    function iconOtro(color, op) {
+      return L.divIcon({ className: '',
+        html: '<div class="otro" style="background:' + (color || '${colors.bright}') + ';opacity:' + (op == null ? 1 : op) + '"></div>',
+        iconSize: [16,16], iconAnchor: [8,8] });
+    }
+    function burbuja(nombre, info, etiqueta) {
+      return '<b>' + nombre + '</b>' + (info ? '<br>' + info : '') + (etiqueta ? '<br><i>' + etiqueta + '</i>' : '');
+    }
 
     var meMarker = null;
     var otrosMarkers = {};
@@ -97,12 +119,15 @@ const HTML = `
       lista.forEach(function (u) {
         if (u.lat == null || u.lng == null) return;
         vistos[u.unitId] = true;
+        var tip = burbuja(u.unitId, u.info, u.etiqueta);
         if (otrosMarkers[u.unitId]) {
-          otrosMarkers[u.unitId].setLatLng([u.lat, u.lng]);
-          otrosMarkers[u.unitId].setTooltipContent(burbuja(u.unitId, u.info));
+          var m0 = otrosMarkers[u.unitId];
+          m0.setLatLng([u.lat, u.lng]);
+          m0.setIcon(iconOtro(u.color, u.op));
+          m0.setTooltipContent(tip);
         } else {
-          var m = L.marker([u.lat, u.lng], { icon: iconOtro() }).addTo(map);
-          m.bindTooltip(burbuja(u.unitId, u.info), { permanent: true, direction: 'top', offset: [0, -10], className: 'bubble' });
+          var m = L.marker([u.lat, u.lng], { icon: iconOtro(u.color, u.op) }).addTo(map);
+          m.bindTooltip(tip, { permanent: true, direction: 'top', offset: [0, -10], className: 'bubble' });
           (function (uu) { m.on('click', function () { avisarUnidad(uu); }); })(u);
           otrosMarkers[u.unitId] = m;
         }
@@ -147,6 +172,8 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
     const vel = velocidadParaEta(userPos?.speed, VELOCIDAD_PRUEBA_KMH);
     const lista = otros
       .filter((u) => u.lat != null && u.lng != null)
+      // Opcionalmente ocultar las fuera de servicio (config); por defecto se ven atenuadas.
+      .filter((u) => !(OCULTAR_FUERA_DE_SERVICIO && u.estado === ESTADOS.FUERA_DE_SERVICIO))
       .map((u) => {
         let info = '';
         if (userPos && userPos.lat != null) {
@@ -154,7 +181,15 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
           const d = distanciaConFallback(userPos.lat, userPos.lng, u.lat, u.lng, us);
           info = formatoMMSS(etaSegundos(d, vel));
         }
-        return { unitId: u.unitId, lat: u.lat, lng: u.lng, info };
+        return {
+          unitId: u.unitId,
+          lat: u.lat,
+          lng: u.lng,
+          info,
+          color: COLOR_ESTADO[u.estado] || colors.bright,
+          op: u.estado === ESTADOS.FUERA_DE_SERVICIO ? 0.4 : 1,
+          etiqueta: ETIQUETA_ESTADO[u.estado] || '',
+        };
       });
     webRef.current.injectJavaScript(`window.setOthers(${JSON.stringify(lista)}); true;`);
   }, [active, ready, otros, userPos]);

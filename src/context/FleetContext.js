@@ -25,6 +25,7 @@ import { leerEstado } from './../services/sharedStatus';
 import { guardarSesion, leerSesion, borrarSesion } from './../services/session';
 import { guardarMensajes, leerMensajesDeHoy } from './../services/chatStore';
 import { fantasmasEnVivo, MODO_PRUEBA_FANTASMAS } from './../config/fantasmas';
+import gestorEstados, { ESTADOS } from './../services/serviceState';
 
 // 1) Creamos el contexto (la "pizarra" vacia).
 const FleetContext = createContext(null);
@@ -191,6 +192,7 @@ export function FleetProvider({ children }) {
     setParada(null);
     setAvgSpeed(0);
     setUserPos(null);
+    gestorEstados.reset();
   }, []);
 
   // ------------------------------------------------------------------
@@ -273,7 +275,18 @@ export function FleetProvider({ children }) {
   const otrosReales = units.filter((u) => u.unitId !== unitId);
   // En modo prueba agregamos los conductores fantasma MOVILES (posicion segun
   // el tiempo). Se recalculan en cada render (el tick los refresca cada 2 s).
-  const otros = MODO_PRUEBA_FANTASMAS ? [...otrosReales, ...fantasmasEnVivo()] : otrosReales;
+  const baseOtros = MODO_PRUEBA_FANTASMAS ? [...otrosReales, ...fantasmasEnVivo()] : otrosReales;
+  // Adjuntamos el ESTADO DE SERVICIO de cada unidad (en servicio / detenida /
+  // en espera / fuera de servicio). El gestor es idempotente si se llama muy
+  // seguido (guarda por unitId y solo recalcula cada MIN_INTERVALO_S).
+  const ahora = Date.now();
+  const otros = baseOtros.map((u) => ({
+    ...u,
+    estado:
+      u.lat != null && u.lng != null
+        ? gestorEstados.estado(u.unitId, u.lat, u.lng, ahora)
+        : ESTADOS.EN_SERVICIO,
+  }));
 
   // El "value" es lo que queda escrito en la pizarra para todos.
   const value = {

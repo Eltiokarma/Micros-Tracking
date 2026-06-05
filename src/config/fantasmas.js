@@ -17,6 +17,12 @@ export const MODO_PRUEBA_FANTASMAS = true;
 export const VELOCIDAD_FANTASMA_KMH = 10;
 export const CANTIDAD_FANTASMAS = 3;
 
+// Si true, el ULTIMO fantasma queda PARADO en un terminal (Apurimac) para
+// probar los estados de espera / fuera de servicio. Poné false para que los 3
+// se muevan.
+export const FANTASMA_PARADO_PRUEBA = true;
+const TERMINAL_PRUEBA = { lat: -15.493430121555079, lng: -70.1290088220023, sentido: 'ida' }; // Apurimac
+
 // Fallback de velocidad para el ETA del usuario cuando aun no hay GPS real.
 export const VELOCIDAD_PRUEBA_KMH = 5;
 
@@ -35,6 +41,18 @@ export function fantasmasEnVivo(now = Date.now()) {
 
   const out = [];
   for (let i = 0; i < CANTIDAD_FANTASMAS; i++) {
+    // Fantasma de prueba PARADO en un terminal (para ver los estados de espera).
+    if (FANTASMA_PARADO_PRUEBA && i === CANTIDAD_FANTASMAS - 1) {
+      out.push({
+        unitId: `Fantasma ${i + 1}`,
+        driverName: `Fantasma ${i + 1} (parado)`,
+        lat: TERMINAL_PRUEBA.lat,
+        lng: TERMINAL_PRUEBA.lng,
+        sentido: TERMINAL_PRUEBA.sentido,
+        fantasma: true,
+      });
+      continue;
+    }
     const off = (OFFSETS[i] != null ? OFFSETS[i] : i / CANTIDAD_FANTASMAS) * loop;
     let d = (recorrido + off) % loop;
     if (d < 0) d += loop;

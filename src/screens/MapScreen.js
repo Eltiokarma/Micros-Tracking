@@ -80,9 +80,9 @@ const HTML = `
       subdomains: 'abcd', maxZoom: 19
     }).addTo(map);
 
-    // Rutas: IDA llena, VUELTA punteada.
-    var lIda = L.polyline(${RUTA_IDA_JSON}, { color: '${colors.bright}', weight: 4, opacity: 0.9 }).addTo(map);
-    var lVuelta = L.polyline(${RUTA_VUELTA_JSON}, { color: '${colors.brand}', weight: 4, opacity: 0.7, dashArray: '6,7' }).addTo(map);
+    // Rutas con DOS colores distintos: IDA azul (llena), VUELTA naranja (punteada).
+    var lIda = L.polyline(${RUTA_IDA_JSON}, { color: '${colors.rutaIda}', weight: 4, opacity: 0.95 }).addTo(map);
+    var lVuelta = L.polyline(${RUTA_VUELTA_JSON}, { color: '${colors.rutaVuelta}', weight: 4, opacity: 0.95, dashArray: '6,7' }).addTo(map);
     var paraderos = ${PARADEROS_JSON};
     paraderos.forEach(function (p) {
       L.circleMarker([p.lat, p.lng], {

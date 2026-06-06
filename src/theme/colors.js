@@ -25,6 +25,10 @@ export const colors = {
   dim: '#5E7C99',       // etiquetas pequenas (TRAMO, VEL. PROM, etc.)
   fg: '#F5F9FF',        // alias de texto en primer plano (= white)
 
+  // --- Colores de las rutas en el mapa (alto contraste entre si) ---
+  rutaIda: '#2E9DFF',     // IDA: azul brillante
+  rutaVuelta: '#FF8A3D',  // VUELTA: naranja (contrasta con el azul y el fondo)
+
   // --- Alias en espanol (por si prefieres usarlos) ---
   azulMarca: '#2580CF',
   azulBrillante: '#2E9DFF',

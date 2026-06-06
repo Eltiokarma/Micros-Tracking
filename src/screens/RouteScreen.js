@@ -11,7 +11,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { useFleet } from '../context/FleetContext';
 import {
   etaSegundos,
@@ -26,14 +26,24 @@ import {
   distanciaConFallback,
 } from '../services/routeProgress';
 import { VELOCIDAD_PRUEBA_KMH } from '../config/fantasmas';
-import { ESTADOS } from '../services/serviceState';
+import { ESTADOS, LABEL_ESTADO } from '../services/serviceState';
 import colors from '../theme/colors';
+import { mono, black } from '../theme/fonts';
 import ContextHeader from '../components/ContextHeader';
 import BigTime from '../components/BigTime';
 import Semaphore from '../components/Semaphore';
 import SosSlider from '../components/SosSlider';
 
 const STATUS_COLOR = { red: colors.red, yellow: colors.yellow, green: colors.green };
+
+// Color del badge segun MI estado de servicio.
+const COLOR_SERVICIO = {
+  [ESTADOS.EN_SERVICIO]: colors.green,
+  [ESTADOS.DETENIDA_EN_RUTA]: colors.bright,
+  [ESTADOS.ESPERA_AMARILLO]: colors.yellow,
+  [ESTADOS.ESPERA_ROJO]: colors.red,
+  [ESTADOS.FUERA_DE_SERVICIO]: colors.dim,
+};
 
 // Suaviza (EMA) el ETA mostrado; se reinicia al cambiar de unidad de referencia.
 function useEtaSuavizado(targetSec, key, alpha = 0.4) {
@@ -54,7 +64,11 @@ function peorEstado(a, b) {
 }
 
 export default function RouteScreen({ onFireSos }) {
-  const { otros, userPos, sendSos, parada, avgSpeed } = useFleet();
+  const { otros, userPos, sendSos, parada, avgSpeed, miEstado } = useFleet();
+
+  // Mi propio estado de servicio (badge bien visible).
+  const miColor = miEstado ? COLOR_SERVICIO[miEstado] : colors.dim;
+  const miLabel = miEstado ? LABEL_ESTADO[miEstado] : 'SIN GPS';
 
   // Velocidad real (con piso) o fallback a la fija si aun no hay GPS.
   const velKmh = velocidadParaEta(userPos?.speed, VELOCIDAD_PRUEBA_KMH);
@@ -106,6 +120,13 @@ export default function RouteScreen({ onFireSos }) {
         contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12, gap: 12 }}
         showsVerticalScrollIndicator={false}
       >
+        {/* MI estado de servicio (como me ve el sistema) */}
+        <View style={[styles.badge, { borderColor: miColor }]}>
+          <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: miColor }} />
+          <Text style={styles.badgeLabel}>Tu estado</Text>
+          <Text style={[styles.badgeEstado, { color: miColor }]}>{miLabel}</Text>
+        </View>
+
         {/* Parada mas cercana + velocidad */}
         <ContextHeader parada={parada} avgSpeed={avgSpeed} />
 
@@ -148,6 +169,30 @@ export default function RouteScreen({ onFireSos }) {
 }
 
 const styles = StyleSheet.create({
+  badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 100,
+    borderWidth: 2,
+    backgroundColor: colors.panel,
+  },
+  badgeLabel: {
+    fontFamily: mono,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    color: colors.dim,
+    textTransform: 'uppercase',
+  },
+  badgeEstado: {
+    fontFamily: black,
+    fontSize: 13,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
   card: {
     backgroundColor: colors.panel,
     borderWidth: 2,

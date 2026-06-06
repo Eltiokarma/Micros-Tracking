@@ -29,6 +29,15 @@ export const ESTADOS = {
   FUERA_DE_SERVICIO: 'fuera_de_servicio',
 };
 
+// Texto legible de cada estado (para mostrarle al usuario su propio estado).
+export const LABEL_ESTADO = {
+  [ESTADOS.EN_SERVICIO]: 'EN SERVICIO',
+  [ESTADOS.DETENIDA_EN_RUTA]: 'DETENIDA EN RUTA',
+  [ESTADOS.ESPERA_AMARILLO]: 'EN ESPERA',
+  [ESTADOS.ESPERA_ROJO]: 'EN ESPERA',
+  [ESTADOS.FUERA_DE_SERVICIO]: 'FUERA DE SERVICIO',
+};
+
 // --- CONSTANTES AJUSTABLES (calibrar en la calle) ---------------------------
 export const UMBRAL_VEL_KMH = 3;        // por debajo de esto = "quieta"
 export const MIN_INTERVALO_S = 2;       // recalcular como mucho cada 2 s

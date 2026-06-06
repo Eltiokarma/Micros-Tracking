@@ -288,6 +288,12 @@ export function FleetProvider({ children }) {
         : ESTADOS.EN_SERVICIO,
   }));
 
+  // Mi PROPIO estado de servicio (sobre mi posicion). null si aun no hay GPS.
+  const miEstado =
+    userPos && userPos.lat != null
+      ? gestorEstados.estado('__yo__', userPos.lat, userPos.lng, ahora)
+      : null;
+
   // El "value" es lo que queda escrito en la pizarra para todos.
   const value = {
     unitId,
@@ -303,6 +309,7 @@ export function FleetProvider({ children }) {
     parada,
     avgSpeed,
     userPos,
+    miEstado,
     sessionChecked,
     messages,
     sosAlert,

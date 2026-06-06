@@ -1,30 +1,64 @@
-import { fantasmasEnVivo, CANTIDAD_FANTASMAS } from './fantasmas';
+import {
+  fantasmasEnVivo,
+  simularFantasma,
+  CANTIDAD_FANTASMAS,
+  VELOCIDADES_FANTASMAS,
+  DESCANSO_IDA_MIN,
+  DESCANSO_VUELTA_MIN,
+} from './fantasmas';
+import { enZonaTerminal } from '../services/serviceState';
 
-describe('fantasmasEnVivo (Tarea 4)', () => {
-  it('devuelve la cantidad configurada de fantasmas', () => {
-    expect(fantasmasEnVivo(0)).toHaveLength(CANTIDAD_FANTASMAS);
+describe('config de 6 fantasmas (Tarea 2)', () => {
+  it('hay 6 fantasmas', () => {
+    expect(CANTIDAD_FANTASMAS).toBe(6);
+    expect(VELOCIDADES_FANTASMAS).toHaveLength(6);
   });
 
-  it('cada fantasma tiene coordenadas validas y un sentido', () => {
-    fantasmasEnVivo(0).forEach((f) => {
-      expect(typeof f.lat).toBe('number');
-      expect(typeof f.lng).toBe('number');
-      expect(Number.isFinite(f.lat)).toBe(true);
-      expect(Number.isFinite(f.lng)).toBe(true);
-      expect(['ida', 'vuelta']).toContain(f.sentido);
-      expect(f.fantasma).toBe(true);
+  it('todas las velocidades son distintas', () => {
+    expect(new Set(VELOCIDADES_FANTASMAS).size).toBe(VELOCIDADES_FANTASMAS.length);
+  });
+
+  it('fantasmasEnVivo devuelve 6 unidades validas', () => {
+    const f = fantasmasEnVivo(Date.now());
+    expect(f).toHaveLength(6);
+    f.forEach((g) => {
+      expect(Number.isFinite(g.lat)).toBe(true);
+      expect(Number.isFinite(g.lng)).toBe(true);
+      expect(['ida', 'vuelta']).toContain(g.sentido);
+      expect(g.fantasma).toBe(true);
     });
   });
+});
 
-  it('se mueven con el tiempo (cambian de posicion)', () => {
-    const a = fantasmasEnVivo(0)[0];
-    const b = fantasmasEnVivo(60000)[0]; // 60 s despues
+describe('simularFantasma (movimiento + descansos, Tarea 3)', () => {
+  it('es deterministico (misma entrada, misma salida)', () => {
+    const a = simularFantasma(0, 123.4);
+    const b = simularFantasma(0, 123.4);
+    expect(a).toEqual(b);
+  });
+
+  it('se mueve con el tiempo', () => {
+    const a = simularFantasma(0, 0);
+    const b = simularFantasma(0, 30); // 30 s despues
     expect(a.lat !== b.lat || a.lng !== b.lng).toBe(true);
   });
 
-  it('arrancan repartidos (no todos en el mismo lugar)', () => {
-    const f = fantasmasEnVivo(0);
-    const distintos = new Set(f.map((x) => x.lat + ',' + x.lng));
-    expect(distintos.size).toBe(CANTIDAD_FANTASMAS);
+  it('en algun momento DESCANSA (parado) en un terminal', () => {
+    let huboDescanso = false;
+    let descansoEnTerminal = true;
+    for (let s = 0; s <= 3600; s += 5) {
+      const p = simularFantasma(0, s);
+      if (p.parado) {
+        huboDescanso = true;
+        if (!enZonaTerminal(p.lat, p.lng)) descansoEnTerminal = false;
+      }
+    }
+    expect(huboDescanso).toBe(true);
+    expect(descansoEnTerminal).toBe(true);
+  });
+
+  it('los tiempos de descanso son los configurados', () => {
+    expect(DESCANSO_IDA_MIN).toEqual([5, 7]);
+    expect(DESCANSO_VUELTA_MIN).toEqual([4, 8]);
   });
 });

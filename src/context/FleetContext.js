@@ -26,6 +26,7 @@ import { guardarSesion, leerSesion, borrarSesion } from './../services/session';
 import { guardarMensajes, leerMensajesDeHoy } from './../services/chatStore';
 import { fantasmasEnVivo, MODO_PRUEBA_FANTASMAS } from './../config/fantasmas';
 import gestorEstados, { ESTADOS } from './../services/serviceState';
+import { construirUnitId, parseUnitId, agruparUnidades } from './../utils/roles';
 
 // 1) Creamos el contexto (la "pizarra" vacia).
 const FleetContext = createContext(null);
@@ -154,18 +155,21 @@ export function FleetProvider({ children }) {
   //  login(): el chofer escribe su nombre y entra.
   //  El nombre ES el ID en el servidor (asi lo definiste).
   // ------------------------------------------------------------------
-  const login = useCallback(async (nombre) => {
-    const id = nombre.trim();
-    if (!id) return;
+  // login de UNIDAD con rol: usuario (de la unidad) + rol (dueno/ayudante) + apodo.
+  const login = useCallback(async (usuario, rol, apodo) => {
+    const u = (usuario || '').trim();
+    if (!u) return;
+    const nick = (apodo || '').trim() || u;
+    const uid = construirUnitId(u, rol); // p.ej. "unidad05::dueno"
 
-    setUnitId(id);
-    setDriverName(id);
+    setUnitId(uid);
+    setDriverName(nick);
 
-    // 0) Recordamos la sesion para entrar directo la proxima vez.
-    guardarSesion(id);
+    // 0) Recordamos la sesion (unidad + rol + apodo) para entrar directo.
+    guardarSesion({ usuario: u, rol, apodo: nick });
 
-    // 1) Abrimos el WebSocket y nos identificamos.
-    socket.connect(id, id);
+    // 1) Abrimos el WebSocket identificandonos como unidad::rol.
+    socket.connect(uid, nick);
 
     // 2) Arrancamos el GPS en segundo plano (pide permisos).
     const res = await location.iniciarRastreo();
@@ -203,9 +207,9 @@ export function FleetProvider({ children }) {
   useEffect(() => {
     let activo = true;
     (async () => {
-      const nombre = await leerSesion();
+      const sesion = await leerSesion();
       if (!activo) return;
-      if (nombre) login(nombre); // arranca conexion + GPS; setUnitId muestra el main
+      if (sesion && sesion.usuario) login(sesion.usuario, sesion.rol, sesion.apodo);
       setSessionChecked(true);
     })();
     return () => {
@@ -272,15 +276,15 @@ export function FleetProvider({ children }) {
   //  otros = las demas combis (para los puntos azules del mapa).
   // ------------------------------------------------------------------
   const miGap = unitId ? gaps[unitId] || null : null;
-  const otrosReales = units.filter((u) => u.unitId !== unitId);
-  // En modo prueba agregamos los conductores fantasma MOVILES (posicion segun
-  // el tiempo). Se recalculan en cada render (el tick los refresca cada 2 s).
-  const baseOtros = MODO_PRUEBA_FANTASMAS ? [...otrosReales, ...fantasmasEnVivo()] : otrosReales;
-  // Adjuntamos el ESTADO DE SERVICIO de cada unidad (en servicio / detenida /
-  // en espera / fuera de servicio). El gestor es idempotente si se llama muy
-  // seguido (guarda por unitId y solo recalcula cada MIN_INTERVALO_S).
+  const miUnidad = unitId ? parseUnitId(unitId).unidad : null;
+  const miRol = unitId ? parseUnitId(unitId).rol : null;
+
+  // Todas las unidades (reales del servidor + fantasmas en modo prueba).
+  const todas = MODO_PRUEBA_FANTASMAS ? [...units, ...fantasmasEnVivo()] : units;
+  // Agrupamos por UNIDAD (prioridad dueno > ayudante) -> una combi por unidad,
+  // excluyendo la mia. Luego adjuntamos el ESTADO DE SERVICIO al representante.
   const ahora = Date.now();
-  const otros = baseOtros.map((u) => ({
+  const otros = agruparUnidades(todas, miUnidad).map((u) => ({
     ...u,
     estado:
       u.lat != null && u.lng != null
@@ -298,6 +302,8 @@ export function FleetProvider({ children }) {
   const value = {
     unitId,
     driverName,
+    miUnidad,
+    miRol,
     units,
     otros,
     gaps,

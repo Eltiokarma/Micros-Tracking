@@ -111,7 +111,7 @@ const HTML = `
 
     function avisarUnidad(u) {
       if (window.ReactNativeWebView)
-        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'unit', unitId: u.unitId, lat: u.lat, lng: u.lng }));
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'unit', unitId: u.unitId, nombre: u.nombre, lat: u.lat, lng: u.lng }));
     }
 
     window.setOthers = function (lista) {
@@ -119,7 +119,7 @@ const HTML = `
       lista.forEach(function (u) {
         if (u.lat == null || u.lng == null) return;
         vistos[u.unitId] = true;
-        var tip = burbuja(u.unitId, u.info, u.etiqueta);
+        var tip = burbuja(u.nombre || u.unitId, u.info, u.etiqueta);
         if (otrosMarkers[u.unitId]) {
           var m0 = otrosMarkers[u.unitId];
           m0.setLatLng([u.lat, u.lng]);
@@ -183,6 +183,7 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
         }
         return {
           unitId: u.unitId,
+          nombre: u.driverName || u.unitId,
           lat: u.lat,
           lng: u.lng,
           info,
@@ -218,7 +219,7 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
             }
             try {
               const msg = JSON.parse(data);
-              if (msg.type === 'unit') setSelected({ unitId: msg.unitId, lat: msg.lat, lng: msg.lng });
+              if (msg.type === 'unit') setSelected({ unitId: msg.unitId, nombre: msg.nombre, lat: msg.lat, lng: msg.lng });
             } catch {
               // ignorar
             }
@@ -271,7 +272,7 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
         <View style={styles.infoCard}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <Text numberOfLines={1} style={{ fontFamily: black, fontSize: 16, color: colors.white, flex: 1 }}>
-              {selected.unitId}
+              {selected.nombre || selected.unitId}
             </Text>
             <Pressable onPress={() => setSelected(null)} hitSlop={10}>
               <Text style={{ fontFamily: black, color: colors.dim, fontSize: 16 }}>✕</Text>

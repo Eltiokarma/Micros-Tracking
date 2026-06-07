@@ -261,10 +261,10 @@ export default function MapScreen({ active, fullscreen, onToggleFullscreen }) {
         </Pressable>
       )}
 
-      {/* Boton discreto: grabador de rutas */}
-      <Pressable style={styles.recBtn} onPress={() => setGrabadorVisible(true)}>
-        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.red }} />
-        <Text style={{ fontFamily: mono, fontSize: 10, letterSpacing: 1, color: colors.white }}>REC</Text>
+      {/* Boton discreto pero comodo: grabador de rutas */}
+      <Pressable style={styles.recBtn} onPress={() => setGrabadorVisible(true)} hitSlop={10}>
+        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: colors.red }} />
+        <Text style={{ fontFamily: black, fontSize: 13, letterSpacing: 1, color: colors.white }}>GRABAR</Text>
       </Pressable>
 
       {/* Tarjeta de la unidad tocada */}
@@ -355,14 +355,18 @@ const styles = StyleSheet.create({
     left: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 7,
-    paddingHorizontal: 12,
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
     borderRadius: 100,
     backgroundColor: colors.panel,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.red,
     elevation: 5,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
   },
   infoCard: {
     position: 'absolute',

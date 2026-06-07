@@ -8,7 +8,8 @@
 // ============================================================================
 
 import React, { useState, useEffect } from 'react';
-import { Modal, View, Text, Pressable, TextInput } from 'react-native';
+import { Modal, View, Text, Pressable, ScrollView } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useFleet } from '../context/FleetContext';
 import {
   agregarPunto,
@@ -25,6 +26,7 @@ export default function RutaRecorder({ visible, onClose }) {
   const { userPos } = useFleet();
   const [grabando, setGrabando] = useState(false);
   const [puntos, setPuntos] = useState([]);
+  const [copiado, setCopiado] = useState(false);
 
   // Al abrir, cargamos la grabacion guardada (por si se cerro la app).
   useEffect(() => {
@@ -56,6 +58,17 @@ export default function RutaRecorder({ visible, onClose }) {
     setGrabando(false);
     setPuntos([]);
     limpiarGrabacion();
+  };
+
+  const copiar = async () => {
+    if (!texto) return;
+    try {
+      await Clipboard.setStringAsync(texto);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+    } catch (e) {
+      console.warn('[rec] no se pudo copiar:', e?.message || e);
+    }
   };
 
   return (
@@ -131,32 +144,45 @@ export default function RutaRecorder({ visible, onClose }) {
             </Pressable>
           </View>
 
-          <Text style={{ fontFamily: mono, fontSize: 10, color: colors.mute, marginTop: 12, marginBottom: 6 }}>
-            Un punto cada ~{DISTANCIA_GRABADOR_M} m recorridos. Mantené la app abierta y la sesión iniciada.
-            Seleccioná el texto para copiarlo.
+          {/* Boton: copiar TODOS los puntos al portapapeles */}
+          <Pressable
+            onPress={copiar}
+            disabled={puntos.length === 0}
+            style={({ pressed }) => ({
+              marginTop: 14,
+              paddingVertical: 13,
+              borderRadius: 12,
+              alignItems: 'center',
+              backgroundColor: copiado ? colors.green : colors.bright,
+              opacity: puntos.length === 0 ? 0.5 : pressed ? 0.85 : 1,
+            })}
+          >
+            <Text style={{ fontFamily: black, fontSize: 14, letterSpacing: 1, color: colors.white }}>
+              {copiado ? '¡COPIADO!' : `COPIAR ${puntos.length} PUNTOS`}
+            </Text>
+          </Pressable>
+
+          <Text style={{ fontFamily: mono, fontSize: 10, color: colors.mute, marginTop: 10, marginBottom: 6 }}>
+            Un punto cada ~{DISTANCIA_GRABADOR_M} m. Mantené la app abierta y la sesión iniciada.
+            También podés seleccionar el texto a mano.
           </Text>
 
-          {/* Exportar: texto seleccionable "lat, lng" por linea */}
-          <TextInput
-            value={texto}
-            editable={false}
-            multiline
-            scrollEnabled
-            selectTextOnFocus
+          {/* Lista scrolleable con el texto seleccionable (respaldo) */}
+          <ScrollView
             style={{
+              maxHeight: 200,
               backgroundColor: colors.panel,
               borderWidth: 1,
               borderColor: colors.line,
               borderRadius: 12,
-              padding: 12,
-              color: colors.white,
-              fontFamily: mono,
-              fontSize: 12,
-              minHeight: 120,
-              maxHeight: 220,
-              textAlignVertical: 'top',
             }}
-          />
+            contentContainerStyle={{ padding: 12 }}
+            nestedScrollEnabled
+          >
+            <Text selectable style={{ color: colors.white, fontFamily: mono, fontSize: 12, lineHeight: 18 }}>
+              {texto || 'Sin puntos todavía.'}
+            </Text>
+          </ScrollView>
         </View>
       </View>
     </Modal>

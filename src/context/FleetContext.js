@@ -22,6 +22,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import * as socket from './../services/socket';
 import * as location from './../services/location';
 import { leerEstado } from './../services/sharedStatus';
+import { leerFlota } from './../services/sharedFleet';
 import { guardarSesion, leerSesion, borrarSesion } from './../services/session';
 import { guardarMensajes, leerMensajesDeHoy } from './../services/chatStore';
 import { fantasmasEnVivo, MODO_PRUEBA_FANTASMAS } from './../config/fantasmas';
@@ -76,11 +77,11 @@ export function FleetProvider({ children }) {
     if (!unitId) return; // sin login no escuchamos nada
 
     const unsubSocket = socket.subscribe((event) => {
-      if (event.type === 'state') {
-        setUnits(event.state.units);
-        setGaps(event.state.gaps);
-        setTotalOnRoute(event.state.totalOnRoute);
-      } else if (event.type === 'sos_alert') {
+      // NOTA: la flota (units/gaps) ya NO se lee del socket de la UI, porque ese
+      // socket no recibe los broadcasts en vivo (viven en el contexto de la
+      // tarea). La fuente de verdad de la flota es el store compartido
+      // (sharedFleet), que se lee en el poll de abajo. Aca solo eventos sueltos.
+      if (event.type === 'sos_alert') {
         // id unico para que la pantalla detecte "llego una alerta nueva".
         setSosAlert({ ...event, id: `${event.unitId}-${event.timestamp}` });
       } else if (event.type === 'chat_msg') {
@@ -133,14 +134,24 @@ export function FleetProvider({ children }) {
     if (!unitId) return undefined;
     let activo = true;
     const revisar = async () => {
+      // 1) Estado de conexion + mi posicion (store de la tarea).
       const est = await leerEstado();
-      if (!activo || !est) return; // sin lectura valida, mantenemos lo anterior
-      const reciente = !!est.enviado && Date.now() - (est.ts || 0) < 10000;
-      setConnected(reciente);
-      if (est.parada) setParada(est.parada);
-      if (typeof est.speed === 'number') setAvgSpeed(est.speed);
-      if (est.lat != null && est.lng != null) {
-        setUserPos({ lat: est.lat, lng: est.lng, routeProgress: est.routeProgress, speed: est.speed });
+      if (activo && est) {
+        const reciente = !!est.enviado && Date.now() - (est.ts || 0) < 10000;
+        setConnected(reciente);
+        if (est.parada) setParada(est.parada);
+        if (typeof est.speed === 'number') setAvgSpeed(est.speed);
+        if (est.lat != null && est.lng != null) {
+          setUserPos({ lat: est.lat, lng: est.lng, routeProgress: est.routeProgress, speed: est.speed });
+        }
+      }
+      // 2) FLOTA EN VIVO: la lista de unidades viene del store compartido (la
+      //    escribe el contexto que recibe los broadcasts 'state' del servidor).
+      const flota = await leerFlota();
+      if (activo && flota) {
+        if (Array.isArray(flota.units)) setUnits(flota.units);
+        if (flota.gaps) setGaps(flota.gaps);
+        if (typeof flota.totalOnRoute === 'number') setTotalOnRoute(flota.totalOnRoute);
       }
     };
     revisar();

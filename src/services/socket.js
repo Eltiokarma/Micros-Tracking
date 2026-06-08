@@ -18,6 +18,8 @@
 //               { type:'unit_left', unitId }
 // ============================================================================
 
+import { escribirFlota } from './sharedFleet';
+
 const WS_URL = 'wss://prototipo-celular-rastreo-01-production.up.railway.app';
 
 // --- Estado interno del modulo (privado, nadie lo toca desde afuera) --------
@@ -96,6 +98,11 @@ export function connect(myUnitId, myDriverName) {
         timestamp: msg.timestamp || Date.now(),
       };
       emit({ type: 'state', state: lastState });
+      // Puente a la UI: este 'state' llega al socket del contexto con la
+      // conexion viva (la tarea de fondo). Lo escribimos en el store compartido
+      // para que la UI lea la flota EN VIVO aunque viva en otro contexto JS.
+      escribirFlota(lastState);
+      console.log('[diag] state recibido | units=' + lastState.units.length);
     } else if (msg.type === 'unit_joined' || msg.type === 'unit_left') {
       // Los reenviamos por si una pantalla quiere mostrar un aviso.
       emit({ type: msg.type, unitId: msg.unitId });

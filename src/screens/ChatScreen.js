@@ -23,7 +23,7 @@ import colors from '../theme/colors';
 import { mono, black } from '../theme/fonts';
 
 export default function ChatScreen() {
-  const { messages, sendChat, unitId, logout } = useFleet();
+  const { messages, sendChat, unitId, driverName, logout } = useFleet();
   const [texto, setTexto] = useState('');
   const scrollRef = useRef(null);
 
@@ -56,7 +56,7 @@ export default function ChatScreen() {
           }}
         >
           <Text style={{ fontFamily: mono, fontSize: 10, color: colors.dim }} numberOfLines={1}>
-            {unitId ? `Sesion: ${unitId}` : ''}
+            {driverName ? `Sesion: ${driverName}` : ''}
           </Text>
           <Text
             style={{

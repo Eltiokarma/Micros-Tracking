@@ -45,4 +45,36 @@ export function estadoProximidadPorEta(seg) {
   return 'green';
 }
 
-export default { distanciaMetros, etaSegundos, formatoMMSS, estadoProximidadPorEta };
+// --- MEJORA A: velocidad real con piso ---------------------------------------
+// Piso de velocidad: si estas casi detenido, no dividimos por ~0 (ETA infinito).
+// 4 km/h es un caminar lento; evita el null y mantiene el numero util.
+export const PISO_VELOCIDAD_KMH = 4;
+
+// Elige la velocidad para el ETA: usa la velocidad REAL reciente si esta
+// disponible (con el piso), o el fallback (la fija) si aun no hay dato de GPS.
+export function velocidadParaEta(speedKmh, fallbackKmh) {
+  if (speedKmh == null || !isFinite(speedKmh)) return fallbackKmh;
+  return Math.max(speedKmh, PISO_VELOCIDAD_KMH);
+}
+
+// --- MEJORA B: suavizado EMA del numero mostrado -----------------------------
+// Promedio movil exponencial: mostrado = alpha*nuevo + (1-alpha)*anterior.
+// Con alpha=0.4 el numero se siente estable y no parpadea cada 3 s.
+// Casos especiales: primer valor (sin anterior) no se suaviza; si el objetivo
+// es muy chico (<=3 s) lo dejamos pasar tal cual para que pueda LLEGAR A 0.
+export function emaSiguiente(prev, target, alpha = 0.4) {
+  if (target == null || !isFinite(target)) return null;
+  if (prev == null || !isFinite(prev)) return target;
+  if (target <= 3) return target;
+  return alpha * target + (1 - alpha) * prev;
+}
+
+export default {
+  distanciaMetros,
+  etaSegundos,
+  formatoMMSS,
+  estadoProximidadPorEta,
+  velocidadParaEta,
+  emaSiguiente,
+  PISO_VELOCIDAD_KMH,
+};

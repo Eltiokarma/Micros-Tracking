@@ -22,9 +22,12 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import * as socket from './../services/socket';
 import * as location from './../services/location';
 import { leerEstado } from './../services/sharedStatus';
+import { leerFlota } from './../services/sharedFleet';
 import { guardarSesion, leerSesion, borrarSesion } from './../services/session';
 import { guardarMensajes, leerMensajesDeHoy } from './../services/chatStore';
-import { FANTASMAS, MODO_PRUEBA_FANTASMAS } from './../config/fantasmas';
+import { fantasmasEnVivo, MODO_PRUEBA_FANTASMAS } from './../config/fantasmas';
+import gestorEstados, { ESTADOS } from './../services/serviceState';
+import { construirUnitId, parseUnitId, agruparUnidades } from './../utils/roles';
 
 // 1) Creamos el contexto (la "pizarra" vacia).
 const FleetContext = createContext(null);
@@ -62,6 +65,10 @@ export function FleetProvider({ children }) {
   // Para no persistir el chat antes de haber cargado los mensajes del dia.
   const chatCargado = useRef(false);
 
+  // "tick" para refrescar la posicion de los fantasmas moviles (no se usa su
+  // valor; solo fuerza re-render cada 2 s para recalcular sus coordenadas).
+  const [, setTick] = useState(0);
+
   // ------------------------------------------------------------------
   //  Escuchamos al socket SOLO mientras hay sesion iniciada.
   //  Cuando unitId cambia (login), nos suscribimos; al salir, limpiamos.
@@ -70,11 +77,11 @@ export function FleetProvider({ children }) {
     if (!unitId) return; // sin login no escuchamos nada
 
     const unsubSocket = socket.subscribe((event) => {
-      if (event.type === 'state') {
-        setUnits(event.state.units);
-        setGaps(event.state.gaps);
-        setTotalOnRoute(event.state.totalOnRoute);
-      } else if (event.type === 'sos_alert') {
+      // NOTA: la flota (units/gaps) ya NO se lee del socket de la UI, porque ese
+      // socket no recibe los broadcasts en vivo (viven en el contexto de la
+      // tarea). La fuente de verdad de la flota es el store compartido
+      // (sharedFleet), que se lee en el poll de abajo. Aca solo eventos sueltos.
+      if (event.type === 'sos_alert') {
         // id unico para que la pantalla detecte "llego una alerta nueva".
         setSosAlert({ ...event, id: `${event.unitId}-${event.timestamp}` });
       } else if (event.type === 'chat_msg') {
@@ -127,14 +134,24 @@ export function FleetProvider({ children }) {
     if (!unitId) return undefined;
     let activo = true;
     const revisar = async () => {
+      // 1) Estado de conexion + mi posicion (store de la tarea).
       const est = await leerEstado();
-      if (!activo || !est) return; // sin lectura valida, mantenemos lo anterior
-      const reciente = !!est.enviado && Date.now() - (est.ts || 0) < 10000;
-      setConnected(reciente);
-      if (est.parada) setParada(est.parada);
-      if (typeof est.speed === 'number') setAvgSpeed(est.speed);
-      if (est.lat != null && est.lng != null) {
-        setUserPos({ lat: est.lat, lng: est.lng, routeProgress: est.routeProgress, speed: est.speed });
+      if (activo && est) {
+        const reciente = !!est.enviado && Date.now() - (est.ts || 0) < 10000;
+        setConnected(reciente);
+        if (est.parada) setParada(est.parada);
+        if (typeof est.speed === 'number') setAvgSpeed(est.speed);
+        if (est.lat != null && est.lng != null) {
+          setUserPos({ lat: est.lat, lng: est.lng, routeProgress: est.routeProgress, speed: est.speed });
+        }
+      }
+      // 2) FLOTA EN VIVO: la lista de unidades viene del store compartido (la
+      //    escribe el contexto que recibe los broadcasts 'state' del servidor).
+      const flota = await leerFlota();
+      if (activo && flota) {
+        if (Array.isArray(flota.units)) setUnits(flota.units);
+        if (flota.gaps) setGaps(flota.gaps);
+        if (typeof flota.totalOnRoute === 'number') setTotalOnRoute(flota.totalOnRoute);
       }
     };
     revisar();
@@ -149,18 +166,21 @@ export function FleetProvider({ children }) {
   //  login(): el chofer escribe su nombre y entra.
   //  El nombre ES el ID en el servidor (asi lo definiste).
   // ------------------------------------------------------------------
-  const login = useCallback(async (nombre) => {
-    const id = nombre.trim();
-    if (!id) return;
+  // login de UNIDAD con rol: usuario (de la unidad) + rol (dueno/ayudante) + apodo.
+  const login = useCallback(async (usuario, rol, apodo) => {
+    const u = (usuario || '').trim();
+    if (!u) return;
+    const nick = (apodo || '').trim() || u;
+    const uid = construirUnitId(u, rol); // p.ej. "unidad05::dueno"
 
-    setUnitId(id);
-    setDriverName(id);
+    setUnitId(uid);
+    setDriverName(nick);
 
-    // 0) Recordamos la sesion para entrar directo la proxima vez.
-    guardarSesion(id);
+    // 0) Recordamos la sesion (unidad + rol + apodo) para entrar directo.
+    guardarSesion({ usuario: u, rol, apodo: nick });
 
-    // 1) Abrimos el WebSocket y nos identificamos.
-    socket.connect(id, id);
+    // 1) Abrimos el WebSocket identificandonos como unidad::rol.
+    socket.connect(uid, nick);
 
     // 2) Arrancamos el GPS en segundo plano (pide permisos).
     const res = await location.iniciarRastreo();
@@ -187,6 +207,7 @@ export function FleetProvider({ children }) {
     setParada(null);
     setAvgSpeed(0);
     setUserPos(null);
+    gestorEstados.reset();
   }, []);
 
   // ------------------------------------------------------------------
@@ -197,9 +218,9 @@ export function FleetProvider({ children }) {
   useEffect(() => {
     let activo = true;
     (async () => {
-      const nombre = await leerSesion();
+      const sesion = await leerSesion();
       if (!activo) return;
-      if (nombre) login(nombre); // arranca conexion + GPS; setUnitId muestra el main
+      if (sesion && sesion.usuario) login(sesion.usuario, sesion.rol, sesion.apodo);
       setSessionChecked(true);
     })();
     return () => {
@@ -228,6 +249,13 @@ export function FleetProvider({ children }) {
   useEffect(() => {
     if (chatCargado.current) guardarMensajes(messages);
   }, [messages]);
+
+  // Mueve los fantasmas: re-render cada 2 s para recalcular sus posiciones.
+  useEffect(() => {
+    if (!MODO_PRUEBA_FANTASMAS) return undefined;
+    const id = setInterval(() => setTick((t) => t + 1), 2000);
+    return () => clearInterval(id);
+  }, []);
 
   // ------------------------------------------------------------------
   //  Acciones de SOS y chat (usan mi posicion local actual).
@@ -259,14 +287,34 @@ export function FleetProvider({ children }) {
   //  otros = las demas combis (para los puntos azules del mapa).
   // ------------------------------------------------------------------
   const miGap = unitId ? gaps[unitId] || null : null;
-  const otrosReales = units.filter((u) => u.unitId !== unitId);
-  // En modo prueba agregamos los conductores fantasma (estaticos) a la flota.
-  const otros = MODO_PRUEBA_FANTASMAS ? [...otrosReales, ...FANTASMAS] : otrosReales;
+  const miUnidad = unitId ? parseUnitId(unitId).unidad : null;
+  const miRol = unitId ? parseUnitId(unitId).rol : null;
+
+  // Todas las unidades (reales del servidor + fantasmas en modo prueba).
+  const todas = MODO_PRUEBA_FANTASMAS ? [...units, ...fantasmasEnVivo()] : units;
+  // Agrupamos por UNIDAD (prioridad dueno > ayudante) -> una combi por unidad,
+  // excluyendo la mia. Luego adjuntamos el ESTADO DE SERVICIO al representante.
+  const ahora = Date.now();
+  const otros = agruparUnidades(todas, miUnidad).map((u) => ({
+    ...u,
+    estado:
+      u.lat != null && u.lng != null
+        ? gestorEstados.estado(u.unitId, u.lat, u.lng, ahora)
+        : ESTADOS.EN_SERVICIO,
+  }));
+
+  // Mi PROPIO estado de servicio (sobre mi posicion). null si aun no hay GPS.
+  const miEstado =
+    userPos && userPos.lat != null
+      ? gestorEstados.estado('__yo__', userPos.lat, userPos.lng, ahora)
+      : null;
 
   // El "value" es lo que queda escrito en la pizarra para todos.
   const value = {
     unitId,
     driverName,
+    miUnidad,
+    miRol,
     units,
     otros,
     gaps,
@@ -278,6 +326,7 @@ export function FleetProvider({ children }) {
     parada,
     avgSpeed,
     userPos,
+    miEstado,
     sessionChecked,
     messages,
     sosAlert,

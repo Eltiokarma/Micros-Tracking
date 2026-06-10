@@ -1,25 +1,32 @@
 // ============================================================================
-//  RouteScreen: pantalla central. La ESTRELLA es el anti-correteo grande.
+//  RouteScreen: pantalla central. DOS relojes: unidad de ADELANTE y de ATRAS.
 // ============================================================================
-//  - Toma la unidad MAS CERCANA (de las unidades en ruta, incluidos los
-//    fantasmas de prueba) y muestra EN GRANDE el ETA hacia ella, con el color
-//    del semaforo (verde = hay hueco, amarillo = acercandote, rojo = muy pegado).
-//  - El semaforo queda de apoyo, integrado debajo.
-//  - Abajo, chico y secundario, el resto de las unidades con su ETA.
-//  - SOS deslizable fijo al pie. Todo sale de useFleet.
-//  Reusa la logica de utils/eta.js (distancia, ETA y estado de proximidad).
+//  - Detecta MI sentido (ida/vuelta) por mi posicion.
+//  - Entre las unidades de MI MISMO sentido, encuentra la de adelante (mas
+//    progreso que yo) y la de atras (menos progreso), por distancia A LO LARGO
+//    DE LA RUTA (con fallback Haversine).
+//  - Cada reloj muestra el ETA (velocidad real + piso, suavizado EMA) con su
+//    color de semaforo. El semaforo central refleja el caso mas urgente.
+//  Reusa utils/eta.js y routeProgress.js (sentido-aware).
 // ============================================================================
 
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { useFleet } from '../context/FleetContext';
 import {
-  distanciaMetros,
   etaSegundos,
   formatoMMSS,
   estadoProximidadPorEta,
+  velocidadParaEta,
+  emaSiguiente,
 } from '../utils/eta';
+import {
+  detectarSentido,
+  progresoEnRuta,
+  distanciaConFallback,
+} from '../services/routeProgress';
 import { VELOCIDAD_PRUEBA_KMH } from '../config/fantasmas';
+import { ESTADOS, LABEL_ESTADO } from '../services/serviceState';
 import colors from '../theme/colors';
 import { mono, black } from '../theme/fonts';
 import ContextHeader from '../components/ContextHeader';
@@ -28,72 +35,129 @@ import Semaphore from '../components/Semaphore';
 import SosSlider from '../components/SosSlider';
 
 const STATUS_COLOR = { red: colors.red, yellow: colors.yellow, green: colors.green };
-const STATUS_TEXTO = { red: 'Muy pegado', yellow: 'Acercándote', green: 'Hay hueco' };
+
+// Color del badge segun MI estado de servicio.
+const COLOR_SERVICIO = {
+  [ESTADOS.EN_SERVICIO]: colors.green,
+  [ESTADOS.DETENIDA_EN_RUTA]: colors.bright,
+  [ESTADOS.ESPERA_AMARILLO]: colors.yellow,
+  [ESTADOS.ESPERA_ROJO]: colors.red,
+  [ESTADOS.FUERA_DE_SERVICIO]: colors.dim,
+};
+
+// Suaviza (EMA) el ETA mostrado; se reinicia al cambiar de unidad de referencia.
+function useEtaSuavizado(targetSec, key, alpha = 0.4) {
+  const [shown, setShown] = useState(null);
+  const prevKey = useRef(null);
+  useEffect(() => {
+    const cambio = prevKey.current !== key;
+    prevKey.current = key;
+    setShown((prev) => emaSiguiente(cambio ? null : prev, targetSec, alpha));
+  }, [targetSec, key, alpha]);
+  return shown;
+}
+
+function peorEstado(a, b) {
+  if (a === 'red' || b === 'red') return 'red';
+  if (a === 'yellow' || b === 'yellow') return 'yellow';
+  return 'green';
+}
 
 export default function RouteScreen({ onFireSos }) {
-  const { otros, userPos, sendSos, parada, avgSpeed } = useFleet();
+  const { otros, userPos, sendSos, parada, avgSpeed, miEstado } = useFleet();
 
-  // Unidades con posicion, ordenadas por distancia a mi (la mas cercana primero).
-  const conPos = otros.filter((u) => u.lat != null && u.lng != null);
-  const ordenadas = userPos
-    ? conPos
-        .map((u) => ({ ...u, dist: distanciaMetros(userPos.lat, userPos.lng, u.lat, u.lng) }))
-        .sort((a, b) => a.dist - b.dist)
-    : conPos.map((u) => ({ ...u, dist: null }));
+  // Mi propio estado de servicio (badge bien visible).
+  const miColor = miEstado ? COLOR_SERVICIO[miEstado] : colors.dim;
+  const miLabel = miEstado ? LABEL_ESTADO[miEstado] : 'SIN GPS';
 
-  const nearest = ordenadas[0] || null;
-  const etaSec = nearest && nearest.dist != null ? etaSegundos(nearest.dist, VELOCIDAD_PRUEBA_KMH) : null;
-  const etaStr = formatoMMSS(etaSec);
-  const status = estadoProximidadPorEta(etaSec);
-  const statusColor = STATUS_COLOR[status];
-  const resto = ordenadas.slice(1);
+  // Velocidad real (con piso) o fallback a la fija si aun no hay GPS.
+  const velKmh = velocidadParaEta(userPos?.speed, VELOCIDAD_PRUEBA_KMH);
+
+  // Mi sentido y mi progreso a lo largo de esa ruta.
+  const sentido = userPos && userPos.lat != null ? detectarSentido(userPos.lat, userPos.lng) : null;
+  const miProg = sentido ? progresoEnRuta(userPos.lat, userPos.lng, sentido) : null;
+
+  // Unidades de MI MISMO sentido, con su progreso en mi ruta.
+  let adelante = null;
+  let atras = null;
+  if (sentido && miProg != null) {
+    const mismos = otros
+      // Las fuera de servicio (fantasma) NO cuentan como adelante/atras.
+      .filter((u) => u.lat != null && u.lng != null && u.estado !== ESTADOS.FUERA_DE_SERVICIO)
+      .map((u) => ({
+        ...u,
+        us: u.sentido || detectarSentido(u.lat, u.lng),
+        prog: progresoEnRuta(u.lat, u.lng, sentido),
+      }))
+      .filter((u) => u.us === sentido);
+
+    const delante = mismos.filter((u) => u.prog > miProg).sort((a, b) => a.prog - b.prog);
+    const detras = mismos.filter((u) => u.prog < miProg).sort((a, b) => b.prog - a.prog);
+    adelante = delante[0] || null;
+    atras = detras[0] || null;
+  }
+
+  const etaAdelCrudo =
+    adelante && userPos
+      ? etaSegundos(distanciaConFallback(userPos.lat, userPos.lng, adelante.lat, adelante.lng, sentido), velKmh)
+      : null;
+  const etaAtrasCrudo =
+    atras && userPos
+      ? etaSegundos(distanciaConFallback(userPos.lat, userPos.lng, atras.lat, atras.lng, sentido), velKmh)
+      : null;
+
+  // Hooks SIEMPRE en el mismo orden (con clave por unidad para reiniciar EMA).
+  const etaAdel = useEtaSuavizado(etaAdelCrudo, adelante ? adelante.unitId : 'adel-none');
+  const etaAtras = useEtaSuavizado(etaAtrasCrudo, atras ? atras.unitId : 'atras-none');
+
+  const statusAdel = estadoProximidadPorEta(etaAdel);
+  const statusAtras = estadoProximidadPorEta(etaAtras);
+  const statusPeor = peorEstado(statusAdel, statusAtras);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg, paddingTop: 56 }}>
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12, gap: 14 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 12, gap: 12 }}
         showsVerticalScrollIndicator={false}
       >
+        {/* MI estado de servicio (como me ve el sistema) */}
+        <View style={[styles.badge, { borderColor: miColor }]}>
+          <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: miColor }} />
+          <Text style={styles.badgeLabel}>Tu estado</Text>
+          <Text style={[styles.badgeEstado, { color: miColor }]}>{miLabel}</Text>
+        </View>
+
         {/* Parada mas cercana + velocidad */}
         <ContextHeader parada={parada} avgSpeed={avgSpeed} />
 
-        {/* ===== HERO: anti-correteo a la unidad mas cercana ===== */}
-        <View style={[styles.hero, { borderColor: statusColor }]}>
-          <Text style={styles.heroLabel}>Anti-correteo</Text>
+        {/* Reloj de la unidad de ADELANTE */}
+        <View style={[styles.card, { borderColor: STATUS_COLOR[statusAdel] }]}>
           <BigTime
-            label={nearest ? `hacia ${nearest.unitId}` : 'sin unidades'}
-            value={etaStr}
-            color={statusColor}
+            label={adelante ? `adelante · ${adelante.unitId}` : 'adelante · libre'}
+            value={formatoMMSS(etaAdel)}
+            color={STATUS_COLOR[statusAdel]}
           />
-          <View style={{ marginTop: 10 }}>
-            <Semaphore status={status} />
-          </View>
-          <Text style={[styles.estado, { color: statusColor }]}>{STATUS_TEXTO[status]}</Text>
         </View>
 
-        {/* ===== Secundario: el resto de las unidades ===== */}
-        {resto.length > 0 && (
-          <View style={styles.sec}>
-            <Text style={styles.secLabel}>Otras unidades</Text>
-            {resto.map((u) => {
-              const e = u.dist != null ? formatoMMSS(etaSegundos(u.dist, VELOCIDAD_PRUEBA_KMH)) : '--:--';
-              return (
-                <View key={u.unitId} style={styles.secRow}>
-                  <Text numberOfLines={1} style={styles.secName}>
-                    {u.unitId}
-                  </Text>
-                  <Text style={styles.secEta}>{e}</Text>
-                </View>
-              );
-            })}
-          </View>
-        )}
+        {/* Semaforo central (el caso mas urgente de los dos) */}
+        <View style={{ alignItems: 'center' }}>
+          <Semaphore status={statusPeor} />
+        </View>
+
+        {/* Reloj de la unidad de ATRAS */}
+        <View style={[styles.card, { borderColor: STATUS_COLOR[statusAtras] }]}>
+          <BigTime
+            label={atras ? `atras · ${atras.unitId}` : 'atras · libre'}
+            value={formatoMMSS(etaAtras)}
+            color={STATUS_COLOR[statusAtras]}
+          />
+        </View>
       </ScrollView>
 
       {/* SOS deslizable, fijo abajo. */}
       <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 24 }}>
         <SosSlider
-          status={status}
+          status={statusPeor}
           onFire={() => {
             sendSos();
             if (onFireSos) onFireSos();
@@ -105,57 +169,40 @@ export default function RouteScreen({ onFireSos }) {
 }
 
 const styles = StyleSheet.create({
-  hero: {
-    backgroundColor: colors.panel,
-    borderWidth: 2,
-    borderRadius: 18,
-    paddingVertical: 16,
-    paddingHorizontal: 12,
+  badge: {
+    flexDirection: 'row',
     alignItems: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-  },
-  heroLabel: {
-    fontFamily: mono,
-    fontSize: 11,
-    letterSpacing: 2,
-    color: colors.dim,
-    textTransform: 'uppercase',
-    marginBottom: 2,
-  },
-  estado: {
-    fontFamily: black,
-    fontSize: 16,
-    letterSpacing: 1,
-    marginTop: 8,
-    textTransform: 'uppercase',
-  },
-  sec: {
+    gap: 8,
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 100,
+    borderWidth: 2,
     backgroundColor: colors.panel,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingTop: 8,
-    paddingBottom: 10,
   },
-  secLabel: {
+  badgeLabel: {
     fontFamily: mono,
     fontSize: 9,
     letterSpacing: 1.5,
     color: colors.dim,
     textTransform: 'uppercase',
-    marginBottom: 4,
   },
-  secRow: {
-    flexDirection: 'row',
+  badgeEstado: {
+    fontFamily: black,
+    fontSize: 13,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  card: {
+    backgroundColor: colors.panel,
+    borderWidth: 2,
+    borderRadius: 18,
+    paddingVertical: 10,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 7,
+    shadowOffset: { width: 0, height: 3 },
   },
-  secName: { fontFamily: black, fontSize: 14, color: colors.white, flex: 1, minWidth: 0 },
-  secEta: { fontFamily: black, fontSize: 18, color: colors.bright, fontVariant: ['tabular-nums'], marginLeft: 12 },
 });
